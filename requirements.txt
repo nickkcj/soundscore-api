@@ -1,0 +1,39 @@
+# FastAPI
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# Validation & Settings
+pydantic==2.10.3
+pydantic-settings==2.6.1
+email-validator==2.2.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.18
+
+# HTTP Client (for Spotify API)
+httpx==0.28.1
+
+# Redis (for WebSocket & caching)
+redis==5.2.1
+
+# AI Chatbot
+google-generativeai==0.8.3
+
+# Image processing
+pillow==11.0.0
+python-magic==0.4.27
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+
+# Development
+python-dotenv==1.0.1
