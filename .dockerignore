@@ -1,9 +1,42 @@
-# Ignore the following to avoid unnecessary files being added to the Docker image
-__pycache__/
-*.pyc
-*.log
-*.db
-*.sqlite3
-media/
-.env
+# Virtual environment
 venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.md
+!README.md
