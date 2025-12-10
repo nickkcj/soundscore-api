@@ -126,3 +126,40 @@ class CacheKeys:
     SPOTIFY_ALBUM = "spotify:album:"  # TTL: 24 hours
     TRENDING_ALBUMS = "trending:albums"  # TTL: 5 min
     USER_PROFILE = "user:profile:"  # TTL: 5 min
+    USER_FEED = "feed:user:"  # TTL: 5 min, invalidated on new review
+    HOME_RECENT = "home:recent"  # TTL: 2 min
+    HOME_TOP = "home:top"  # TTL: 5 min
+
+
+class CacheInvalidation:
+    """Helper methods for cache invalidation."""
+
+    @staticmethod
+    async def on_new_review(user_id: int, follower_ids: list[int]) -> None:
+        """
+        Invalidate caches when a user creates a new review.
+
+        Args:
+            user_id: The user who created the review
+            follower_ids: List of user IDs who follow this user
+        """
+        # Invalidate the author's own feed
+        await CacheService.delete(f"{CacheKeys.USER_FEED}{user_id}:*")
+
+        # Invalidate followers' feeds (they should see the new review)
+        for follower_id in follower_ids:
+            await CacheService.delete_pattern(f"{CacheKeys.USER_FEED}{follower_id}:*")
+
+        # Invalidate home page caches
+        await CacheService.delete(CacheKeys.HOME_RECENT)
+        await CacheService.delete_pattern(f"{CacheKeys.HOME_TOP}*")
+
+    @staticmethod
+    async def on_review_delete(user_id: int, follower_ids: list[int]) -> None:
+        """Invalidate caches when a review is deleted."""
+        await CacheInvalidation.on_new_review(user_id, follower_ids)
+
+    @staticmethod
+    async def on_follow_change(user_id: int) -> None:
+        """Invalidate feed cache when user follows/unfollows someone."""
+        await CacheService.delete_pattern(f"{CacheKeys.USER_FEED}{user_id}:*")

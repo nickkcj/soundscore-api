@@ -23,6 +23,7 @@ from app.core.exceptions import (
 from app.dependencies import CurrentUser, OptionalUser, DbSession
 from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService
+from app.services.cache_service import CacheInvalidation
 from app.config import get_settings
 
 router = APIRouter()
@@ -211,6 +212,9 @@ async def follow_user(
 
     await db.commit()
 
+    # Invalidate current user's feed cache (now includes new user's reviews)
+    await CacheInvalidation.on_follow_change(current_user.id)
+
     # Get updated follower count
     count_result = await db.execute(
         select(func.count()).select_from(UserFollow).where(UserFollow.following_id == target_user.id)
@@ -261,6 +265,9 @@ async def unfollow_user(
     # Remove follow
     await db.delete(follow)
     await db.commit()
+
+    # Invalidate current user's feed cache (no longer includes unfollowed user's reviews)
+    await CacheInvalidation.on_follow_change(current_user.id)
 
     # Get updated follower count
     count_result = await db.execute(

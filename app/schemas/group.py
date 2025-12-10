@@ -80,6 +80,7 @@ class GroupMessageResponse(BaseModel):
     """Schema for group message response."""
     id: int
     content: str
+    image_url: Optional[str] = None
     created_at: datetime
 
     # User info
@@ -116,12 +117,14 @@ class WSMessageIn(BaseModel):
     """Schema for incoming WebSocket messages."""
     type: str = "message"  # "message", "typing", "ping"
     content: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class WSMessageOut(BaseModel):
     """Schema for outgoing WebSocket messages."""
     type: str  # "message", "user_joined", "user_left", "online_users", "typing", "pong"
     content: Optional[str] = None
+    image_url: Optional[str] = None
     user_id: Optional[int] = None
     username: Optional[str] = None
     profile_picture: Optional[str] = None

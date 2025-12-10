@@ -33,6 +33,7 @@ from app.services.spotify_service import spotify_service
 from app.services.gemini_service import gemini_service
 from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService
+from app.services.cache_service import CacheInvalidation
 from app.utils.batch_queries import build_review_responses_batch
 
 router = APIRouter()
@@ -399,6 +400,13 @@ async def create_review(
     db.add(review)
     await db.commit()
 
+    # Invalidate feed caches for the author's followers
+    follower_result = await db.execute(
+        select(UserFollow.follower_id).where(UserFollow.following_id == current_user.id)
+    )
+    follower_ids = [row[0] for row in follower_result.all()]
+    await CacheInvalidation.on_new_review(current_user.id, follower_ids)
+
     # Reload with relationships
     await db.refresh(review)
     result = await db.execute(
@@ -507,8 +515,17 @@ async def delete_review(
     if review.user_id != current_user.id:
         raise ForbiddenException("You can only delete your own reviews")
 
+    # Get follower IDs before deleting
+    follower_result = await db.execute(
+        select(UserFollow.follower_id).where(UserFollow.following_id == current_user.id)
+    )
+    follower_ids = [row[0] for row in follower_result.all()]
+
     await db.delete(review)
     await db.commit()
+
+    # Invalidate feed caches
+    await CacheInvalidation.on_review_delete(current_user.id, follower_ids)
 
     return MessageResponse(message="Review deleted successfully")
 

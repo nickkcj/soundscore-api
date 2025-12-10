@@ -108,6 +108,7 @@ class GroupMessage(Base):
         index=True
     )
     content: Mapped[str] = mapped_column(Text)
+    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

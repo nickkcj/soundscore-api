@@ -40,13 +40,14 @@ async def verify_group_membership(user_id: int, group_id: int) -> bool:
         return result.scalar_one_or_none() is not None
 
 
-async def save_message(group_id: int, user_id: int, content: str) -> GroupMessage:
+async def save_message(group_id: int, user_id: int, content: str, image_url: str | None = None) -> GroupMessage:
     """Save a chat message to the database."""
     async with AsyncSessionLocal() as db:
         message = GroupMessage(
             group_id=group_id,
             user_id=user_id,
             content=content,
+            image_url=image_url,
         )
         db.add(message)
         await db.commit()
@@ -200,16 +201,24 @@ async def group_chat_websocket(
 
                 if message_type == "message":
                     content = message_data.get("content", "").strip()
-                    if not content:
+                    image_url = message_data.get("image_url")
+
+                    # Message must have content or image
+                    if not content and not image_url:
                         continue
 
                     # Save message to database
-                    saved_message = await save_message(group_id, user.id, content)
+                    saved_message = await save_message(group_id, user.id, content, image_url)
 
                     # Get fresh user data for up-to-date profile picture
                     fresh_user = await get_fresh_user_data(user.id)
                     username = fresh_user["username"] if fresh_user else user.username
                     profile_picture = fresh_user["profile_picture"] if fresh_user else user.profile_picture
+
+                    # Resolve image URL if it's a storage path
+                    resolved_image_url = image_url
+                    if image_url and not image_url.startswith("http"):
+                        resolved_image_url = await StorageService.get_signed_url(image_url, expires_in=86400)
 
                     # Broadcast to all users in the group
                     await manager.broadcast_to_group(
@@ -217,6 +226,7 @@ async def group_chat_websocket(
                         {
                             "type": "message",
                             "content": content,
+                            "image_url": resolved_image_url,
                             "user_id": user.id,
                             "username": username,
                             "profile_picture": profile_picture,

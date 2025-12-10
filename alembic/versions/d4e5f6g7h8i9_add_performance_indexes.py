@@ -23,7 +23,8 @@ def upgrade() -> None:
         'ix_notifications_recipient_read_created',
         'notifications',
         ['recipient_id', 'is_read', 'created_at'],
-        postgresql_ops={'created_at': 'DESC'}
+        postgresql_ops={'created_at': 'DESC'},
+        if_not_exists=True
     )
 
     # Composite index for faster review duplicate check
@@ -31,7 +32,8 @@ def upgrade() -> None:
         'ix_reviews_user_album',
         'reviews',
         ['user_id', 'album_id'],
-        unique=True
+        unique=True,
+        if_not_exists=True
     )
 
     # Index for faster chatbot message pagination
@@ -39,21 +41,24 @@ def upgrade() -> None:
         'ix_chat_messages_user_created',
         'chat_messages',
         ['user_id', 'created_at'],
-        postgresql_ops={'created_at': 'DESC'}
+        postgresql_ops={'created_at': 'DESC'},
+        if_not_exists=True
     )
 
     # Index for faster review likes count queries
     op.create_index(
         'ix_review_likes_review_id',
         'review_likes',
-        ['review_id']
+        ['review_id'],
+        if_not_exists=True
     )
 
     # Index for faster comment count queries
     op.create_index(
         'ix_comments_review_id',
         'comments',
-        ['review_id']
+        ['review_id'],
+        if_not_exists=True
     )
 
 

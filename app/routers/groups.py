@@ -287,14 +287,19 @@ async def get_group(
     )
     messages = messages_result.scalars().all()
 
-    # Build message responses with resolved profile pictures
+    # Build message responses with resolved profile pictures and image URLs
     message_responses = []
     for m in reversed(messages):  # Oldest first
         profile_url = await StorageService.resolve_profile_picture(m.user.profile_picture)
+        # Resolve message image URL if present
+        message_image_url = None
+        if m.image_url:
+            message_image_url = await StorageService.get_signed_url(m.image_url, expires_in=3600)
         message_responses.append(
             GroupMessageResponse(
                 id=m.id,
                 content=m.content,
+                image_url=message_image_url,
                 created_at=m.created_at,
                 user_id=m.user.id,
                 username=m.user.username,
@@ -519,6 +524,106 @@ async def upload_group_cover(
         )
 
 
+@router.post(
+    "/{group_id}/messages/image",
+    summary="Upload image for group message",
+)
+async def upload_message_image(
+    group_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    file: UploadFile = File(...),
+):
+    """
+    Upload an image to be sent in a group message.
+
+    - Only group members can upload images
+    - Accepts JPG, PNG, WebP, and GIF images
+    - Maximum file size: 5MB
+    - Returns the image URL to be used in the message
+    """
+    settings = get_settings()
+
+    # Verify membership
+    member_result = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == current_user.id
+        )
+    )
+    if not member_result.scalar_one_or_none():
+        raise ForbiddenException("Not a member of this group")
+
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    if file.content_type not in allowed_types:
+        raise BadRequestException(
+            f"Invalid file type. Allowed: {', '.join(allowed_types)}"
+        )
+
+    # Validate file size
+    contents = await file.read()
+    if len(contents) > settings.max_upload_size_bytes:
+        raise BadRequestException(
+            f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
+        )
+
+    # Check Supabase configuration
+    if not settings.supabase_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Storage service not configured"
+        )
+
+    storage_key = settings.supabase_service_role_key or settings.supabase_key
+    if not storage_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Storage service not configured"
+        )
+
+    try:
+        bucket = "group_message_images"
+
+        # Generate unique filename
+        file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
+        filename = f"{group_id}/{current_user.id}_{uuid.uuid4()}.{file_ext}"
+
+        # Upload to Supabase Storage via REST API
+        upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                upload_url,
+                content=contents,
+                headers={
+                    "Authorization": f"Bearer {storage_key}",
+                    "apikey": storage_key,
+                    "Content-Type": file.content_type,
+                }
+            )
+
+            if response.status_code not in (200, 201):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload: {response.text}"
+                )
+
+        # Get signed URL for the uploaded image
+        image_path = f"{bucket}/{filename}"
+        signed_url = await StorageService.get_signed_url(image_path, expires_in=86400)  # 24 hours
+
+        return {"image_url": signed_url, "image_path": image_path}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload image: {str(e)}"
+        )
+
+
 # ============== Membership ==============
 
 @router.post(
@@ -713,14 +818,19 @@ async def get_group_messages(
     )
     messages = result.scalars().all()
 
-    # Build message responses with resolved profile pictures
+    # Build message responses with resolved profile pictures and image URLs
     message_responses = []
     for m in reversed(messages):
         profile_url = await StorageService.resolve_profile_picture(m.user.profile_picture)
+        # Resolve message image URL if present
+        message_image_url = None
+        if m.image_url:
+            message_image_url = await StorageService.get_signed_url(m.image_url, expires_in=3600)
         message_responses.append(
             GroupMessageResponse(
                 id=m.id,
                 content=m.content,
+                image_url=message_image_url,
                 created_at=m.created_at,
                 user_id=m.user.id,
                 username=m.user.username,

@@ -22,6 +22,7 @@ from app.core.exceptions import NotFoundException
 from app.dependencies import CurrentUser, DbSession, QueryTokenUser
 from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService
+from app.services.cache_service import CacheService, CacheKeys
 from app.utils.batch_queries import build_review_responses_batch
 
 router = APIRouter()
@@ -46,7 +47,14 @@ async def get_feed(
 
     Shows reviews from users you follow, ordered by most recent.
     If you don't follow anyone, shows latest reviews from all users.
+    Cached for 5 minutes, invalidated when followed users post new reviews.
     """
+    # Check cache first
+    cache_key = f"{CacheKeys.USER_FEED}{current_user.id}:{page}:{per_page}:{sort}"
+    cached = await CacheService.get_json(cache_key)
+    if cached:
+        return FeedResponse(**cached)
+
     # Get IDs of users the current user follows
     following_result = await db.execute(
         select(UserFollow.following_id).where(UserFollow.follower_id == current_user.id)
@@ -85,7 +93,7 @@ async def get_feed(
     # Build responses using batch queries (avoids N+1)
     review_responses = await build_review_responses_batch(reviews, db, current_user.id)
 
-    return FeedResponse(
+    response = FeedResponse(
         reviews=review_responses,
         total=total,
         page=page,
@@ -93,6 +101,11 @@ async def get_feed(
         has_next=offset + per_page < total,
         has_prev=page > 1,
     )
+
+    # Cache for 5 minutes
+    await CacheService.set_json(cache_key, response.model_dump(), ttl=300)
+
+    return response
 
 
 # ============== Notifications ==============
