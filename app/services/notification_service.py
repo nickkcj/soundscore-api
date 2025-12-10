@@ -118,13 +118,12 @@ class NotificationService:
         review: Review,
     ):
         """Create notification when someone likes a review."""
-        message = f"{actor.username} liked your review"
         await NotificationService.create_notification(
             db=db,
             recipient_id=review.user_id,
             actor_id=actor.id,
             notification_type="like",
-            message=message,
+            message="liked your review",
             review_id=review.id,
         )
 
@@ -136,13 +135,12 @@ class NotificationService:
         comment: Comment,
     ):
         """Create notification when someone comments on a review."""
-        message = f"{actor.username} commented on your review"
         await NotificationService.create_notification(
             db=db,
             recipient_id=review.user_id,
             actor_id=actor.id,
             notification_type="comment",
-            message=message,
+            message="commented on your review",
             review_id=review.id,
             comment_id=comment.id,
         )
@@ -155,13 +153,12 @@ class NotificationService:
         reply: Comment,
     ):
         """Create notification when someone replies to a comment."""
-        message = f"{actor.username} replied to your comment"
         await NotificationService.create_notification(
             db=db,
             recipient_id=parent_comment.user_id,
             actor_id=actor.id,
-            notification_type="comment",
-            message=message,
+            notification_type="reply",
+            message="replied to your comment",
             review_id=parent_comment.review_id,
             comment_id=reply.id,
         )
@@ -173,13 +170,12 @@ class NotificationService:
         recipient_id: int,
     ):
         """Create notification when someone follows a user."""
-        message = f"{actor.username} started following you"
         await NotificationService.create_notification(
             db=db,
             recipient_id=recipient_id,
             actor_id=actor.id,
             notification_type="follow",
-            message=message,
+            message="started following you",
         )
 
 

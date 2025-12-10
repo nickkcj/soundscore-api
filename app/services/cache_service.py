@@ -129,6 +129,7 @@ class CacheKeys:
     USER_FEED = "feed:user:"  # TTL: 5 min, invalidated on new review
     HOME_RECENT = "home:recent"  # TTL: 2 min
     HOME_TOP = "home:top"  # TTL: 5 min
+    USER_SUGGESTIONS = "suggestions:user:"  # TTL: 15 min, invalidated on new review/follow
 
 
 class CacheInvalidation:
@@ -154,6 +155,9 @@ class CacheInvalidation:
         await CacheService.delete(CacheKeys.HOME_RECENT)
         await CacheService.delete_pattern(f"{CacheKeys.HOME_TOP}*")
 
+        # Invalidate all user suggestion caches (new activity affects recommendations)
+        await CacheService.delete_pattern(f"{CacheKeys.USER_SUGGESTIONS}*")
+
     @staticmethod
     async def on_review_delete(user_id: int, follower_ids: list[int]) -> None:
         """Invalidate caches when a review is deleted."""
@@ -161,5 +165,7 @@ class CacheInvalidation:
 
     @staticmethod
     async def on_follow_change(user_id: int) -> None:
-        """Invalidate feed cache when user follows/unfollows someone."""
+        """Invalidate feed and suggestions cache when user follows/unfollows someone."""
         await CacheService.delete_pattern(f"{CacheKeys.USER_FEED}{user_id}:*")
+        # Invalidate this user's suggestions (following list changed)
+        await CacheService.delete_pattern(f"{CacheKeys.USER_SUGGESTIONS}{user_id}:*")

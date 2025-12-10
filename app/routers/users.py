@@ -24,6 +24,7 @@ from app.dependencies import CurrentUser, OptionalUser, DbSession
 from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService
 from app.services.cache_service import CacheInvalidation
+from app.services.recommendation_service import RecommendationService
 from app.config import get_settings
 
 router = APIRouter()
@@ -447,51 +448,31 @@ async def get_suggested_users(
     limit: int = Query(5, ge=1, le=20),
 ):
     """
-    Get suggested users to follow based on popularity (most followers).
-    Excludes users the current user is already following.
+    Get suggested users to follow based on activity similarity.
+
+    Algorithm considers:
+    - Similar album ratings (users who rated same albums similarly)
+    - Common review likes (users who liked the same reviews)
+    - Recent activity (users who posted reviews recently)
+    - Favorite albums overlap (shared favorite albums)
+
+    For new users with no reviews, shows most recently active users.
+    Results are cached for 15 minutes.
     """
-    # Get IDs of users the current user is already following
-    following_result = await db.execute(
-        select(UserFollow.following_id).where(UserFollow.follower_id == current_user.id)
+    recommendations = await RecommendationService.get_recommended_users(
+        db, current_user.id, limit
     )
-    following_ids = set(row[0] for row in following_result.all())
-    following_ids.add(current_user.id)  # Also exclude self
-
-    # Get users with most followers, excluding already followed users
-    subquery = (
-        select(
-            UserFollow.following_id,
-            func.count(UserFollow.follower_id).label("followers_count")
-        )
-        .group_by(UserFollow.following_id)
-        .subquery()
-    )
-
-    result = await db.execute(
-        select(User, subquery.c.followers_count)
-        .outerjoin(subquery, User.id == subquery.c.following_id)
-        .where(User.id.notin_(following_ids))
-        .order_by(subquery.c.followers_count.desc().nullslast())
-        .limit(limit)
-    )
-    rows = result.all()
-
-    # Parallel profile picture resolution
-    profile_pics = await asyncio.gather(*[
-        StorageService.resolve_profile_picture(user.profile_picture)
-        for user, _ in rows
-    ])
 
     users = [
         UserListItem(
-            id=user.id,
-            username=user.username,
-            profile_picture=profile_pic,
-            bio=user.bio,
+            id=rec.user_id,
+            username=rec.username,
+            profile_picture=rec.profile_picture,
+            bio=rec.bio,
             is_following=False,
-            followers_count=followers_count or 0,
+            followers_count=rec.followers_count,
         )
-        for (user, followers_count), profile_pic in zip(rows, profile_pics)
+        for rec in recommendations
     ]
 
     return PaginatedUsersResponse(
