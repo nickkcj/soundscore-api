@@ -42,9 +42,20 @@ async def _get_group_member_count(db: DbSession, group_id: int) -> int:
     return result.scalar() or 0
 
 
-async def _build_group_response(group: Group, db: DbSession) -> GroupResponse:
+async def _build_group_response(group: Group, db: DbSession, user_id: int | None = None) -> GroupResponse:
     """Build a GroupResponse with member count and resolved cover image URL."""
     member_count = await _get_group_member_count(db, group.id)
+
+    # Check if user is member
+    is_member = None
+    if user_id is not None:
+        member_result = await db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group.id,
+                GroupMember.user_id == user_id
+            )
+        )
+        is_member = member_result.scalar_one_or_none() is not None
 
     # Resolve cover image to signed URL
     cover_image_url = None
@@ -61,6 +72,7 @@ async def _build_group_response(group: Group, db: DbSession) -> GroupResponse:
         created_at=group.created_at,
         created_by_id=group.created_by_id,
         member_count=member_count,
+        is_member=is_member,
     )
 
 
@@ -147,9 +159,10 @@ async def list_groups(
     groups = result.scalars().all()
 
     # Build responses
+    user_id = current_user.id if current_user else None
     group_responses = []
     for group in groups:
-        group_responses.append(await _build_group_response(group, db))
+        group_responses.append(await _build_group_response(group, db, user_id))
 
     return GroupListResponse(
         groups=group_responses,
@@ -197,10 +210,10 @@ async def list_my_groups(
     )
     groups = result.scalars().all()
 
-    # Build responses
+    # Build responses (user is always a member in my-groups)
     group_responses = []
     for group in groups:
-        group_responses.append(await _build_group_response(group, db))
+        group_responses.append(await _build_group_response(group, db, current_user.id))
 
     return GroupListResponse(
         groups=group_responses,
@@ -667,6 +680,27 @@ async def join_group(
     )
     db.add(member)
     await db.commit()
+    await db.refresh(member)
+
+    # Get new member count
+    member_count = await _get_group_member_count(db, group_id)
+
+    # Resolve profile picture for broadcast
+    profile_picture = await StorageService.resolve_profile_picture(current_user.profile_picture)
+
+    # Broadcast to all connected users in the group
+    await manager.broadcast_to_group(
+        group_id,
+        {
+            "type": "member_joined",
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "profile_picture": profile_picture,
+            "role": "member",
+            "joined_at": member.joined_at.isoformat(),
+            "member_count": member_count,
+        },
+    )
 
     return MessageResponse(message=f"Joined group '{group.name}'")
 

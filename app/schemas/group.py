@@ -35,6 +35,7 @@ class GroupResponse(BaseModel):
 
     # Stats
     member_count: int = 0
+    is_member: Optional[bool] = None
 
     model_config = {"from_attributes": True}
 
