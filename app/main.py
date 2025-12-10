@@ -34,7 +34,11 @@ app = FastAPI(
 # CORS Middleware - configure for your frontend domain in production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else ["https://yourdomain.com"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://soundscore.com.br",
+        "https://www.soundscore.com.br",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
