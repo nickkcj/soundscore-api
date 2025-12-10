@@ -52,6 +52,7 @@ class UserListItem(BaseModel):
     profile_picture: Optional[str] = None
     bio: Optional[str] = None
     is_following: Optional[bool] = None
+    followers_count: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

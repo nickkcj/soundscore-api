@@ -50,3 +50,14 @@ class PasswordChangeRequest(BaseModel):
 class MessageResponse(BaseModel):
     """Generic message response."""
     message: str
+
+
+class PasswordResetRequest(BaseModel):
+    """Schema para solicitar reset de senha."""
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    """Schema para confirmar reset de senha."""
+    token: str
+    new_password: str = Field(..., min_length=6)

@@ -125,3 +125,44 @@ def verify_refresh_token(token: str) -> Optional[str]:
         return None
 
     return payload.get("sub")
+
+
+def create_password_reset_token(email: str) -> str:
+    """
+    Create a JWT token for password reset.
+
+    Args:
+        email: The email address to encode in the token
+
+    Returns:
+        Encoded JWT password reset token
+    """
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.password_reset_token_expire_minutes
+    )
+    to_encode = {
+        "sub": email,
+        "exp": expire,
+        "type": "password_reset",
+    }
+    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def verify_password_reset_token(token: str) -> Optional[str]:
+    """
+    Verify a password reset token and return the email.
+
+    Args:
+        token: The JWT password reset token
+
+    Returns:
+        The email if valid, None otherwise
+    """
+    payload = decode_token(token)
+    if payload is None:
+        return None
+
+    if payload.get("type") != "password_reset":
+        return None
+
+    return payload.get("sub")

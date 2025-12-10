@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.models.feed import Notification
 from app.models.review import Review, Comment
+from app.services.storage_service import StorageService
 
 
 class NotificationService:
@@ -90,6 +91,9 @@ class NotificationService:
         )
         actor = actor_result.scalar_one()
 
+        # Resolve profile picture URL for SSE
+        actor_profile_url = await StorageService.resolve_profile_picture(actor.profile_picture)
+
         # Push to SSE connections
         notification_data = {
             "id": notification.id,
@@ -99,7 +103,7 @@ class NotificationService:
             "created_at": notification.created_at.isoformat(),
             "actor_id": actor_id,
             "actor_username": actor.username,
-            "actor_profile_picture": actor.profile_picture,
+            "actor_profile_picture": actor_profile_url,
             "review_id": review_id,
             "comment_id": comment_id,
         }

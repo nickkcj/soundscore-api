@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 5
     allowed_image_types: list[str] = ["image/jpeg", "image/png", "image/webp"]
 
+    # Email (Resend)
+    resend_api_key: Optional[str] = None
+    frontend_url: str = "http://localhost:3000"
+    password_reset_token_expire_minutes: int = 15
+
     @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024

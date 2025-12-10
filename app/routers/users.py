@@ -416,6 +416,68 @@ async def get_following(
     )
 
 
+@router.get(
+    "/suggested",
+    response_model=PaginatedUsersResponse,
+    summary="Get suggested users to follow",
+)
+async def get_suggested_users(
+    db: DbSession,
+    current_user: CurrentUser,
+    limit: int = Query(5, ge=1, le=20),
+):
+    """
+    Get suggested users to follow based on popularity (most followers).
+    Excludes users the current user is already following.
+    """
+    # Get IDs of users the current user is already following
+    following_result = await db.execute(
+        select(UserFollow.following_id).where(UserFollow.follower_id == current_user.id)
+    )
+    following_ids = set(row[0] for row in following_result.all())
+    following_ids.add(current_user.id)  # Also exclude self
+
+    # Get users with most followers, excluding already followed users
+    subquery = (
+        select(
+            UserFollow.following_id,
+            func.count(UserFollow.follower_id).label("followers_count")
+        )
+        .group_by(UserFollow.following_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(User, subquery.c.followers_count)
+        .outerjoin(subquery, User.id == subquery.c.following_id)
+        .where(User.id.notin_(following_ids))
+        .order_by(subquery.c.followers_count.desc().nullslast())
+        .limit(limit)
+    )
+    rows = result.all()
+
+    users = []
+    for user, followers_count in rows:
+        profile_pic = await StorageService.resolve_profile_picture(user.profile_picture)
+        users.append(UserListItem(
+            id=user.id,
+            username=user.username,
+            profile_picture=profile_pic,
+            bio=user.bio,
+            is_following=False,
+            followers_count=followers_count or 0,
+        ))
+
+    return PaginatedUsersResponse(
+        users=users,
+        total=len(users),
+        page=1,
+        per_page=limit,
+        has_next=False,
+        has_prev=False,
+    )
+
+
 @router.post(
     "/profile/picture",
     response_model=UserProfileResponse,

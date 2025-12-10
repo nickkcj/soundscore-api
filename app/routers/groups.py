@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Query
+import uuid
+import httpx
+from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.models.user import User
+from app.config import get_settings
 from app.models.group import Group, GroupMember, GroupMessage
 from app.schemas.group import (
     GroupCreate,
@@ -40,15 +43,21 @@ async def _get_group_member_count(db: DbSession, group_id: int) -> int:
 
 
 async def _build_group_response(group: Group, db: DbSession) -> GroupResponse:
-    """Build a GroupResponse with member count."""
+    """Build a GroupResponse with member count and resolved cover image URL."""
     member_count = await _get_group_member_count(db, group.id)
+
+    # Resolve cover image to signed URL
+    cover_image_url = None
+    if group.cover_image:
+        cover_image_url = await StorageService.get_signed_url(group.cover_image, expires_in=3600)
+
     return GroupResponse(
         id=group.id,
         name=group.name,
         description=group.description,
         privacy=group.privacy,
         category=group.category,
-        cover_image=group.cover_image,
+        cover_image=cover_image_url,
         created_at=group.created_at,
         created_by_id=group.created_by_id,
         member_count=member_count,
@@ -379,6 +388,135 @@ async def delete_group(
     await db.commit()
 
     return MessageResponse(message="Group deleted successfully")
+
+
+@router.post(
+    "/{group_id}/cover",
+    response_model=GroupResponse,
+    summary="Upload group cover image",
+)
+async def upload_group_cover(
+    group_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    file: UploadFile = File(...),
+):
+    """
+    Upload a cover image for the group.
+
+    - Only admins can upload cover images
+    - Accepts JPG, PNG, WebP, and GIF images
+    - Maximum file size: 5MB
+    """
+    settings = get_settings()
+
+    # Get group
+    result = await db.execute(
+        select(Group).where(Group.id == group_id)
+    )
+    group = result.scalar_one_or_none()
+
+    if not group:
+        raise NotFoundException("Group not found")
+
+    # Check if user is admin
+    member_result = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == current_user.id,
+            GroupMember.role == "admin"
+        )
+    )
+    if not member_result.scalar_one_or_none():
+        raise ForbiddenException("Only admins can upload cover images")
+
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    if file.content_type not in allowed_types:
+        raise BadRequestException(
+            f"Invalid file type. Allowed: {', '.join(allowed_types)}"
+        )
+
+    # Validate file size
+    contents = await file.read()
+    if len(contents) > settings.max_upload_size_bytes:
+        raise BadRequestException(
+            f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
+        )
+
+    # Check Supabase configuration
+    if not settings.supabase_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Storage service not configured"
+        )
+
+    storage_key = settings.supabase_service_role_key or settings.supabase_key
+    if not storage_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Storage service not configured"
+        )
+
+    try:
+        bucket = "groups_cover_images"
+
+        # Generate unique filename
+        file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
+        filename = f"{group_id}_{uuid.uuid4()}.{file_ext}"
+
+        # Upload to Supabase Storage via REST API
+        upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
+
+        async with httpx.AsyncClient() as client:
+            # Delete old cover image if exists
+            if group.cover_image:
+                try:
+                    old_path = group.cover_image
+                    if old_path.startswith(f"{bucket}/"):
+                        old_filename = old_path.split(f"{bucket}/")[-1]
+                        delete_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{old_filename}"
+                        await client.delete(
+                            delete_url,
+                            headers={
+                                "Authorization": f"Bearer {storage_key}",
+                                "apikey": storage_key,
+                            }
+                        )
+                except Exception:
+                    pass  # Ignore errors when deleting old file
+
+            # Upload new file
+            response = await client.post(
+                upload_url,
+                content=contents,
+                headers={
+                    "Authorization": f"Bearer {storage_key}",
+                    "apikey": storage_key,
+                    "Content-Type": file.content_type,
+                }
+            )
+
+            if response.status_code not in (200, 201):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload: {response.text}"
+                )
+
+        # Store the path
+        group.cover_image = f"{bucket}/{filename}"
+        await db.commit()
+        await db.refresh(group)
+
+        return await _build_group_response(group, db)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload image: {str(e)}"
+        )
 
 
 # ============== Membership ==============

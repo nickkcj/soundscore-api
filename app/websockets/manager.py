@@ -17,9 +17,7 @@ class ConnectionManager:
         self.user_groups: Dict[int, Set[int]] = {}
 
     async def connect(self, websocket: WebSocket, group_id: int, user_id: int):
-        """Accept a new WebSocket connection."""
-        await websocket.accept()
-
+        """Register a WebSocket connection (must be already accepted)."""
         # Add to group connections
         if group_id not in self.active_connections:
             self.active_connections[group_id] = {}

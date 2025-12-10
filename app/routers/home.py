@@ -1,5 +1,6 @@
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 
 from app.models.user import User
@@ -28,6 +29,25 @@ class TopAlbumResponse(BaseModel):
 class TopAlbumsListResponse(BaseModel):
     """Schema for top albums list response."""
     albums: list[TopAlbumResponse]
+
+
+class TrendingAlbumResponse(BaseModel):
+    """Schema for trending album response."""
+    spotify_id: str
+    title: str
+    artist: str
+    cover_image: str | None = None
+    release_date: str | None = None
+    avg_rating: float | None = None
+    review_count: int
+    week_start: str  # ISO date string of the week start
+
+
+class TrendingAlbumsListResponse(BaseModel):
+    """Schema for trending albums list response."""
+    albums: list[TrendingAlbumResponse]
+    week_start: str  # Which week the data is from
+    week_end: str
 
 
 class RecentReviewResponse(BaseModel):
@@ -147,3 +167,89 @@ async def get_recent_reviews(
         ))
 
     return RecentReviewsListResponse(reviews=review_responses)
+
+
+@router.get(
+    "/trending-albums",
+    response_model=TrendingAlbumsListResponse,
+    summary="Get trending albums",
+)
+async def get_trending_albums(
+    db: DbSession,
+    limit: int = Query(6, ge=1, le=20, description="Number of albums to return"),
+    max_weeks_back: int = Query(12, ge=1, le=52, description="Max weeks to look back"),
+):
+    """
+    Get trending albums based on review count in the current week.
+
+    If no reviews are found in the current week, it looks back week by week
+    until it finds a week with reviews (up to max_weeks_back).
+
+    Albums are ranked by review count (descending), then by average rating.
+    """
+    now = datetime.now(timezone.utc)
+
+    # Find the start of the current week (Monday)
+    days_since_monday = now.weekday()
+    current_week_start = (now - timedelta(days=days_since_monday)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    albums = []
+    week_start = current_week_start
+    week_end = week_start + timedelta(days=7)
+
+    # Look back week by week until we find data
+    for _ in range(max_weeks_back):
+        # Query albums with reviews in this week, ordered by review count
+        result = await db.execute(
+            select(
+                Album.spotify_id,
+                Album.title,
+                Album.artist,
+                Album.cover_image,
+                Album.release_date,
+                func.avg(Review.rating).label("avg_rating"),
+                func.count(Review.id).label("review_count")
+            )
+            .join(Review, Review.album_id == Album.id)
+            .where(
+                and_(
+                    Review.created_at >= week_start,
+                    Review.created_at < week_end
+                )
+            )
+            .group_by(Album.id)
+            .order_by(
+                func.count(Review.id).desc(),
+                func.avg(Review.rating).desc()
+            )
+            .limit(limit)
+        )
+
+        rows = result.all()
+
+        if rows:
+            # Found data for this week
+            for row in rows:
+                albums.append(TrendingAlbumResponse(
+                    spotify_id=row.spotify_id,
+                    title=row.title,
+                    artist=row.artist,
+                    cover_image=row.cover_image,
+                    release_date=row.release_date,
+                    avg_rating=round(float(row.avg_rating), 1) if row.avg_rating else None,
+                    review_count=row.review_count,
+                    week_start=week_start.date().isoformat(),
+                ))
+            break
+
+        # No data this week, go back one week
+        week_end = week_start
+        week_start = week_start - timedelta(days=7)
+
+    return TrendingAlbumsListResponse(
+        albums=albums,
+        week_start=week_start.date().isoformat(),
+        week_end=week_end.date().isoformat(),
+    )

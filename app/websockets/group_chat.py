@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.group import Group, GroupMember, GroupMessage
 from app.core.security import verify_access_token
 from app.websockets.manager import manager
+from app.services.storage_service import StorageService
 
 router = APIRouter()
 
@@ -53,8 +54,26 @@ async def save_message(group_id: int, user_id: int, content: str) -> GroupMessag
         return message
 
 
+async def get_fresh_user_data(user_id: int) -> dict | None:
+    """Get fresh user data from database with resolved profile picture URL."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            # Resolve profile picture to signed URL
+            profile_picture_url = await StorageService.resolve_profile_picture(user.profile_picture)
+            return {
+                "id": user.id,
+                "username": user.username,
+                "profile_picture": profile_picture_url,
+            }
+        return None
+
+
 async def get_online_users_info(group_id: int, online_user_ids: list[int]) -> list[dict]:
-    """Get user info for online users."""
+    """Get user info for online users with resolved profile picture URLs."""
     if not online_user_ids:
         return []
 
@@ -64,14 +83,15 @@ async def get_online_users_info(group_id: int, online_user_ids: list[int]) -> li
         )
         users = result.scalars().all()
 
-        return [
-            {
+        users_info = []
+        for user in users:
+            profile_picture_url = await StorageService.resolve_profile_picture(user.profile_picture)
+            users_info.append({
                 "user_id": user.id,
                 "username": user.username,
-                "profile_picture": user.profile_picture,
-            }
-            for user in users
-        ]
+                "profile_picture": profile_picture_url,
+            })
+        return users_info
 
 
 @router.websocket("/ws/group/{group_id}")
@@ -128,17 +148,23 @@ async def group_chat_websocket(
     # Authenticate user
     user = await get_user_from_token(token)
     if not user:
+        await websocket.accept()
         await websocket.close(code=4001, reason="Invalid or expired token")
         return
 
     # Verify group membership
     is_member = await verify_group_membership(user.id, group_id)
     if not is_member:
+        await websocket.accept()
         await websocket.close(code=4003, reason="Not a member of this group")
         return
 
-    # Accept connection
+    # Accept connection and register
+    await websocket.accept()
     await manager.connect(websocket, group_id, user.id)
+
+    # Resolve profile picture URL for this user
+    user_profile_picture = await StorageService.resolve_profile_picture(user.profile_picture)
 
     try:
         # Notify others that user joined
@@ -148,7 +174,7 @@ async def group_chat_websocket(
                 "type": "user_joined",
                 "user_id": user.id,
                 "username": user.username,
-                "profile_picture": user.profile_picture,
+                "profile_picture": user_profile_picture,
             },
             exclude_user_id=user.id,
         )
@@ -180,6 +206,11 @@ async def group_chat_websocket(
                     # Save message to database
                     saved_message = await save_message(group_id, user.id, content)
 
+                    # Get fresh user data for up-to-date profile picture
+                    fresh_user = await get_fresh_user_data(user.id)
+                    username = fresh_user["username"] if fresh_user else user.username
+                    profile_picture = fresh_user["profile_picture"] if fresh_user else user.profile_picture
+
                     # Broadcast to all users in the group
                     await manager.broadcast_to_group(
                         group_id,
@@ -187,8 +218,8 @@ async def group_chat_websocket(
                             "type": "message",
                             "content": content,
                             "user_id": user.id,
-                            "username": user.username,
-                            "profile_picture": user.profile_picture,
+                            "username": username,
+                            "profile_picture": profile_picture,
                             "message_id": saved_message.id,
                             "timestamp": saved_message.created_at.isoformat(),
                         },

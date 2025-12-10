@@ -13,6 +13,8 @@ from app.schemas.auth import (
     RefreshTokenRequest,
     PasswordChangeRequest,
     MessageResponse,
+    PasswordResetRequest,
+    PasswordResetConfirm,
 )
 from app.schemas.user import UserResponse
 from app.core.security import (
@@ -21,6 +23,8 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     verify_refresh_token,
+    create_password_reset_token,
+    verify_password_reset_token,
 )
 from app.core.exceptions import (
     BadRequestException,
@@ -29,6 +33,7 @@ from app.core.exceptions import (
 )
 from app.dependencies import CurrentUser, DbSession
 from app.services.storage_service import StorageService
+from app.services.email_service import email_service
 
 router = APIRouter()
 
@@ -203,3 +208,72 @@ async def get_me(current_user: CurrentUser):
         bio=current_user.bio,
         created_at=current_user.created_at,
     )
+
+
+@router.post(
+    "/forgot-password",
+    response_model=MessageResponse,
+    summary="Request password reset",
+)
+async def forgot_password(request: PasswordResetRequest, db: DbSession):
+    """
+    Request a password reset email.
+
+    - **email**: The email address associated with your account
+
+    Note: For security reasons, this endpoint always returns success
+    even if the email doesn't exist in our system.
+    """
+    # Find user by email
+    result = await db.execute(
+        select(User).where(User.email == request.email.lower())
+    )
+    user = result.scalar_one_or_none()
+
+    # Always return success message (security: don't reveal if email exists)
+    if user and user.is_active:
+        # Generate reset token
+        reset_token = create_password_reset_token(user.email)
+
+        # Send email
+        await email_service.send_password_reset_email(user.email, reset_token)
+
+    return MessageResponse(
+        message="If an account with this email exists, you will receive a password reset link shortly."
+    )
+
+
+@router.post(
+    "/reset-password",
+    response_model=MessageResponse,
+    summary="Reset password with token",
+)
+async def reset_password(request: PasswordResetConfirm, db: DbSession):
+    """
+    Reset password using a valid reset token.
+
+    - **token**: The password reset token from the email
+    - **new_password**: Your new password (min 6 characters)
+    """
+    # Verify the token
+    email = verify_password_reset_token(request.token)
+    if email is None:
+        raise BadRequestException("Invalid or expired reset token")
+
+    # Find the user
+    result = await db.execute(
+        select(User).where(User.email == email)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise BadRequestException("Invalid or expired reset token")
+
+    if not user.is_active:
+        raise BadRequestException("User account is inactive")
+
+    # Update password
+    user.password_hash = hash_password(request.new_password)
+    await db.commit()
+
+    return MessageResponse(message="Password has been reset successfully")
