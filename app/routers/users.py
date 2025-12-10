@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import httpx
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
@@ -324,16 +325,22 @@ async def get_followers(
         )
         following_ids = set(row[0] for row in following_result.all())
 
-    users = []
-    for f in follows:
-        profile_pic = await StorageService.resolve_profile_picture(f.follower.profile_picture)
-        users.append(UserListItem(
+    # Parallel profile picture resolution
+    profile_pics = await asyncio.gather(*[
+        StorageService.resolve_profile_picture(f.follower.profile_picture)
+        for f in follows
+    ])
+
+    users = [
+        UserListItem(
             id=f.follower.id,
             username=f.follower.username,
             profile_picture=profile_pic,
             bio=f.follower.bio,
             is_following=f.follower.id in following_ids if current_user else None,
-        ))
+        )
+        for f, profile_pic in zip(follows, profile_pics)
+    ]
 
     return PaginatedUsersResponse(
         users=users,
@@ -395,16 +402,22 @@ async def get_following(
         )
         following_ids = set(row[0] for row in current_following_result.all())
 
-    users = []
-    for f in follows:
-        profile_pic = await StorageService.resolve_profile_picture(f.following.profile_picture)
-        users.append(UserListItem(
+    # Parallel profile picture resolution
+    profile_pics = await asyncio.gather(*[
+        StorageService.resolve_profile_picture(f.following.profile_picture)
+        for f in follows
+    ])
+
+    users = [
+        UserListItem(
             id=f.following.id,
             username=f.following.username,
             profile_picture=profile_pic,
             bio=f.following.bio,
             is_following=f.following.id in following_ids if current_user else None,
-        ))
+        )
+        for f, profile_pic in zip(follows, profile_pics)
+    ]
 
     return PaginatedUsersResponse(
         users=users,
@@ -456,17 +469,23 @@ async def get_suggested_users(
     )
     rows = result.all()
 
-    users = []
-    for user, followers_count in rows:
-        profile_pic = await StorageService.resolve_profile_picture(user.profile_picture)
-        users.append(UserListItem(
+    # Parallel profile picture resolution
+    profile_pics = await asyncio.gather(*[
+        StorageService.resolve_profile_picture(user.profile_picture)
+        for user, _ in rows
+    ])
+
+    users = [
+        UserListItem(
             id=user.id,
             username=user.username,
             profile_picture=profile_pic,
             bio=user.bio,
             is_following=False,
             followers_count=followers_count or 0,
-        ))
+        )
+        for (user, followers_count), profile_pic in zip(rows, profile_pics)
+    ]
 
     return PaginatedUsersResponse(
         users=users,

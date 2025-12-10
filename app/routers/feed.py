@@ -22,66 +22,9 @@ from app.core.exceptions import NotFoundException
 from app.dependencies import CurrentUser, DbSession, QueryTokenUser
 from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService
+from app.utils.batch_queries import build_review_responses_batch
 
 router = APIRouter()
-
-
-# ============== Helper Functions ==============
-
-async def _build_review_response(
-    review: Review,
-    db: DbSession,
-    current_user_id: int | None = None
-) -> ReviewResponse:
-    """Build a ReviewResponse with all related data."""
-    # Get like count
-    like_count_result = await db.execute(
-        select(func.count()).select_from(ReviewLike).where(ReviewLike.review_id == review.id)
-    )
-    like_count = like_count_result.scalar() or 0
-
-    # Get comment count
-    comment_count_result = await db.execute(
-        select(func.count()).select_from(Comment).where(Comment.review_id == review.id)
-    )
-    comment_count = comment_count_result.scalar() or 0
-
-    # Check if current user liked
-    is_liked = None
-    if current_user_id:
-        like_result = await db.execute(
-            select(ReviewLike).where(
-                ReviewLike.review_id == review.id,
-                ReviewLike.user_id == current_user_id
-            )
-        )
-        is_liked = like_result.scalar_one_or_none() is not None
-
-    # Resolve profile picture URL
-    profile_picture_url = await StorageService.resolve_profile_picture(review.user.profile_picture)
-
-    return ReviewResponse(
-        id=review.id,
-        rating=review.rating,
-        text=review.text,
-        is_favorite=review.is_favorite,
-        created_at=review.created_at,
-        updated_at=review.updated_at,
-        album=AlbumResponse(
-            id=review.album.id,
-            spotify_id=review.album.spotify_id,
-            title=review.album.title,
-            artist=review.album.artist,
-            cover_image=review.album.cover_image,
-            release_date=review.album.release_date,
-        ),
-        user_id=review.user.id,
-        username=review.user.username,
-        user_profile_picture=profile_picture_url,
-        like_count=like_count,
-        comment_count=comment_count,
-        is_liked=is_liked,
-    )
 
 
 # ============== Social Feed ==============
@@ -139,12 +82,8 @@ async def get_feed(
     )
     reviews = result.scalars().all()
 
-    # Build responses
-    review_responses = []
-    for review in reviews:
-        review_responses.append(
-            await _build_review_response(review, db, current_user.id)
-        )
+    # Build responses using batch queries (avoids N+1)
+    review_responses = await build_review_responses_batch(reviews, db, current_user.id)
 
     return FeedResponse(
         reviews=review_responses,
@@ -205,24 +144,28 @@ async def get_notifications(
     )
     notifications = result.scalars().all()
 
+    # Parallel profile picture resolution
+    profile_urls = await asyncio.gather(*[
+        StorageService.resolve_profile_picture(n.actor.profile_picture)
+        for n in notifications
+    ])
+
     # Build responses
-    notification_responses = []
-    for n in notifications:
-        actor_profile_url = await StorageService.resolve_profile_picture(n.actor.profile_picture)
-        notification_responses.append(
-            NotificationResponse(
-                id=n.id,
-                notification_type=n.notification_type,
-                message=n.message,
-                is_read=n.is_read,
-                created_at=n.created_at,
-                actor_id=n.actor.id,
-                actor_username=n.actor.username,
-                actor_profile_picture=actor_profile_url,
-                review_id=n.review_id,
-                comment_id=n.comment_id,
-            )
+    notification_responses = [
+        NotificationResponse(
+            id=n.id,
+            notification_type=n.notification_type,
+            message=n.message,
+            is_read=n.is_read,
+            created_at=n.created_at,
+            actor_id=n.actor.id,
+            actor_username=n.actor.username,
+            actor_profile_picture=profile_url,
+            review_id=n.review_id,
+            comment_id=n.comment_id,
         )
+        for n, profile_url in zip(notifications, profile_urls)
+    ]
 
     return NotificationListResponse(
         notifications=notification_responses,

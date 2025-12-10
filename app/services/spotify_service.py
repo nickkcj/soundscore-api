@@ -1,4 +1,5 @@
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -6,6 +7,7 @@ import httpx
 
 from app.config import get_settings
 from app.schemas.review import SpotifyAlbumResult
+from app.services.cache_service import CacheService, CacheKeys
 
 settings = get_settings()
 
@@ -62,10 +64,18 @@ class SpotifyService:
             limit: Maximum number of results (default 20, max 50)
 
         Returns:
-            List of album search results
+            List of album search results (cached for 1 hour)
         """
         if not query.strip():
             return []
+
+        # Check cache first (hash query for cache key)
+        query_hash = hashlib.md5(f"{query.lower()}:{limit}".encode()).hexdigest()
+        cache_key = f"{CacheKeys.SPOTIFY_SEARCH}{query_hash}"
+
+        cached = await CacheService.get_json(cache_key)
+        if cached:
+            return [SpotifyAlbumResult(**item) for item in cached]
 
         token = await self._get_access_token()
 
@@ -93,6 +103,13 @@ class SpotifyService:
                     release_date=item.get("release_date"),
                 )
             )
+
+        # Cache results for 1 hour
+        await CacheService.set_json(
+            cache_key,
+            [a.model_dump() for a in albums],
+            ttl=3600
+        )
 
         return albums
 
@@ -172,8 +189,14 @@ class SpotifyService:
             spotify_id: Spotify album ID
 
         Returns:
-            Complete album details with tracks, or None if not found
+            Complete album details with tracks, or None if not found (cached for 24h)
         """
+        # Check cache first
+        cache_key = f"{CacheKeys.SPOTIFY_ALBUM}{spotify_id}"
+        cached = await CacheService.get_json(cache_key)
+        if cached:
+            return cached
+
         token = await self._get_access_token()
 
         async with httpx.AsyncClient() as client:
@@ -217,6 +240,9 @@ class SpotifyService:
             })
 
         album_details["tracks"] = tracks
+
+        # Cache for 24 hours (album info doesn't change often)
+        await CacheService.set_json(cache_key, album_details, ttl=86400)
 
         return album_details
 

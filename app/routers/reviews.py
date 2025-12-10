@@ -33,6 +33,7 @@ from app.services.spotify_service import spotify_service
 from app.services.gemini_service import gemini_service
 from app.services.notification_service import NotificationService
 from app.services.storage_service import StorageService
+from app.utils.batch_queries import build_review_responses_batch
 
 router = APIRouter()
 
@@ -560,15 +561,10 @@ async def get_user_reviews(
     )
     reviews = result.scalars().all()
 
-    # Build responses
-    review_responses = []
-    for review in reviews:
-        review_responses.append(
-            await _build_review_response(
-                review, db,
-                current_user.id if current_user else None
-            )
-        )
+    # Build responses using batch queries (avoids N+1)
+    review_responses = await build_review_responses_batch(
+        reviews, db, current_user.id if current_user else None
+    )
 
     return ReviewListResponse(
         reviews=review_responses,
@@ -628,15 +624,10 @@ async def get_album_reviews(
     )
     reviews = result.scalars().all()
 
-    # Build responses
-    review_responses = []
-    for review in reviews:
-        review_responses.append(
-            await _build_review_response(
-                review, db,
-                current_user.id if current_user else None
-            )
-        )
+    # Build responses using batch queries (avoids N+1)
+    review_responses = await build_review_responses_batch(
+        reviews, db, current_user.id if current_user else None
+    )
 
     return ReviewListResponse(
         reviews=review_responses,

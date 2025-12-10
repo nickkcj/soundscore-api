@@ -1,14 +1,15 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
+from pydantic import BaseModel
 
 from app.models.user import User
 from app.models.review import Album, Review, ReviewLike, Comment
 from app.schemas.review import ReviewResponse, AlbumResponse
 from app.dependencies import DbSession, OptionalUser
 from app.services.storage_service import StorageService
-from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -145,14 +146,14 @@ async def get_recent_reviews(
     )
     reviews = result.scalars().all()
 
-    review_responses = []
-    for review in reviews:
-        # Resolve profile picture URL
-        profile_picture_url = await StorageService.resolve_profile_picture(
-            review.user.profile_picture
-        )
+    # Parallel profile picture resolution
+    profile_urls = await asyncio.gather(*[
+        StorageService.resolve_profile_picture(r.user.profile_picture)
+        for r in reviews
+    ])
 
-        review_responses.append(RecentReviewResponse(
+    review_responses = [
+        RecentReviewResponse(
             id=review.id,
             rating=review.rating,
             text=review.text,
@@ -163,8 +164,10 @@ async def get_recent_reviews(
             album_spotify_id=review.album.spotify_id,
             user_id=review.user.id,
             username=review.user.username,
-            user_profile_picture=profile_picture_url,
-        ))
+            user_profile_picture=profile_url,
+        )
+        for review, profile_url in zip(reviews, profile_urls)
+    ]
 
     return RecentReviewsListResponse(reviews=review_responses)
 

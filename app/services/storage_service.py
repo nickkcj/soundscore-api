@@ -1,5 +1,6 @@
 import httpx
 from app.config import get_settings
+from app.services.cache_service import CacheService, CacheKeys
 
 
 class StorageService:
@@ -63,7 +64,7 @@ class StorageService:
         Resolve a profile picture path to a usable URL.
 
         If the path is already a full URL, return it as-is.
-        If it's a storage path, generate a signed URL.
+        If it's a storage path, generate a signed URL (cached for 45 min).
         """
         if not path:
             return None
@@ -72,15 +73,24 @@ class StorageService:
         if path.startswith("http://") or path.startswith("https://"):
             return path
 
+        # Check cache first (URLs are valid for 1 hour, cache for 45 min)
+        cache_key = f"{CacheKeys.SIGNED_URL}{path}"
+        cached_url = await CacheService.get(cache_key)
+        if cached_url:
+            return cached_url
+
         # Generate signed URL for storage path
-        return await StorageService.get_signed_url(path, expires_in=3600)
+        url = await StorageService.get_signed_url(path, expires_in=3600)
+        if url:
+            await CacheService.set(cache_key, url, ttl=2700)  # 45 minutes
+        return url
 
     @staticmethod
     async def resolve_banner_image(path: str | None) -> str | None:
         """
         Resolve a banner image path to a usable URL.
 
-        Same logic as profile picture.
+        Same logic as profile picture with caching.
         """
         if not path:
             return None
@@ -88,4 +98,13 @@ class StorageService:
         if path.startswith("http://") or path.startswith("https://"):
             return path
 
-        return await StorageService.get_signed_url(path, expires_in=3600)
+        # Check cache first
+        cache_key = f"{CacheKeys.SIGNED_URL}{path}"
+        cached_url = await CacheService.get(cache_key)
+        if cached_url:
+            return cached_url
+
+        url = await StorageService.get_signed_url(path, expires_in=3600)
+        if url:
+            await CacheService.set(cache_key, url, ttl=2700)  # 45 minutes
+        return url
