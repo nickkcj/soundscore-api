@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models.user import User, UserFollow
 from app.models.review import Review, ReviewLike, Comment, Album
 from app.models.feed import Notification
+from app.models.group import Group
 from app.schemas.feed import (
     NotificationResponse,
     NotificationListResponse,
@@ -150,7 +151,11 @@ async def get_notifications(
     offset = (page - 1) * per_page
     result = await db.execute(
         query
-        .options(selectinload(Notification.actor))
+        .options(
+            selectinload(Notification.actor),
+            selectinload(Notification.group_invite),
+            selectinload(Notification.review),
+        )
         .order_by(Notification.created_at.desc())
         .offset(offset)
         .limit(per_page)
@@ -164,21 +169,40 @@ async def get_notifications(
     ])
 
     # Build responses
-    notification_responses = [
-        NotificationResponse(
-            id=n.id,
-            notification_type=n.notification_type,
-            message=n.message,
-            is_read=n.is_read,
-            created_at=n.created_at,
-            actor_id=n.actor.id,
-            actor_username=n.actor.username,
-            actor_profile_picture=profile_url,
-            review_id=n.review_id,
-            comment_id=n.comment_id,
-        )
-        for n, profile_url in zip(notifications, profile_urls)
-    ]
+    notification_responses = []
+    for n, profile_url in zip(notifications, profile_urls):
+        response_data = {
+            "id": n.id,
+            "notification_type": n.notification_type,
+            "message": n.message,
+            "is_read": n.is_read,
+            "created_at": n.created_at,
+            "actor_id": n.actor.id,
+            "actor_username": n.actor.username,
+            "actor_profile_picture": profile_url,
+            "review_id": n.review_id,
+            "review_uuid": n.review.uuid if n.review else None,
+            "comment_id": n.comment_id,
+        }
+
+        # Add group invite data if present
+        if n.group_invite:
+            response_data["invite_uuid"] = n.group_invite.uuid
+            response_data["expires_at"] = n.group_invite.expires_at
+            # Get group info
+            group_result = await db.execute(
+                select(Group).where(Group.id == n.group_invite.group_id)
+            )
+            group = group_result.scalar_one_or_none()
+            if group:
+                response_data["group_uuid"] = group.uuid
+                response_data["group_name"] = group.name
+                if group.cover_image:
+                    response_data["group_cover_image"] = await StorageService.get_signed_url(
+                        group.cover_image, expires_in=3600
+                    )
+
+        notification_responses.append(NotificationResponse(**response_data))
 
     return NotificationListResponse(
         notifications=notification_responses,

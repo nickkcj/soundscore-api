@@ -200,9 +200,14 @@ async def discover(
     # Search users in database
     if type in ("users", "all"):
         # Search by username (case-insensitive, partial match)
+        # Exclude current user from results
+        user_filters = [User.username.ilike(f"%{q}%")]
+        if current_user:
+            user_filters.append(User.id != current_user.id)
+
         user_query = await db.execute(
             select(User)
-            .where(User.username.ilike(f"%{q}%"))
+            .where(*user_filters)
             .order_by(User.username)
             .limit(limit)
         )

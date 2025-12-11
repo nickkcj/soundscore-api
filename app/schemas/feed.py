@@ -11,7 +11,7 @@ from app.schemas.review import ReviewResponse
 class NotificationResponse(BaseModel):
     """Schema for notification response."""
     id: int
-    notification_type: str  # "like", "comment", "follow", "review"
+    notification_type: str  # "like", "comment", "follow", "review", "group_invite"
     message: str
     is_read: bool
     created_at: datetime
@@ -25,6 +25,13 @@ class NotificationResponse(BaseModel):
     review_id: Optional[int] = None
     review_uuid: Optional[UUID] = None
     comment_id: Optional[int] = None
+
+    # Group invite specific fields
+    invite_uuid: Optional[UUID] = None
+    group_uuid: Optional[UUID] = None
+    group_name: Optional[str] = None
+    group_cover_image: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
