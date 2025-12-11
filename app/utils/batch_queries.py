@@ -104,6 +104,7 @@ async def build_review_responses_batch(
         responses.append(
             ReviewResponse(
                 id=review.id,
+                uuid=review.uuid,
                 rating=review.rating,
                 text=review.text,
                 is_favorite=review.is_favorite,
