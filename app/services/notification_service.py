@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.models.feed import Notification
 from app.models.review import Review, Comment
+from app.models.group import Group, GroupInvite
 from app.services.storage_service import StorageService
 
 
@@ -177,6 +178,59 @@ class NotificationService:
             notification_type="follow",
             message="started following you",
         )
+
+    @staticmethod
+    async def create_group_invite_notification(
+        db: AsyncSession,
+        actor: User,
+        group: Group,
+        invite: GroupInvite,
+        recipient_id: int,
+    ):
+        """Create notification when someone is invited to a private group."""
+        # Don't notify yourself
+        if recipient_id == actor.id:
+            return None
+
+        notification = Notification(
+            recipient_id=recipient_id,
+            actor_id=actor.id,
+            notification_type="group_invite",
+            message=f"invited you to join '{group.name}'",
+            group_invite_id=invite.id,
+        )
+        db.add(notification)
+        await db.flush()
+        await db.refresh(notification)
+
+        # Resolve profile picture URL for SSE
+        actor_profile_url = await StorageService.resolve_profile_picture(actor.profile_picture)
+
+        # Resolve group cover image
+        group_cover_url = None
+        if group.cover_image:
+            group_cover_url = await StorageService.get_signed_url(group.cover_image, expires_in=3600)
+
+        # Push to SSE with extra invite data
+        notification_data = {
+            "id": notification.id,
+            "notification_type": "group_invite",
+            "message": f"invited you to join '{group.name}'",
+            "is_read": False,
+            "created_at": notification.created_at.isoformat(),
+            "actor_id": actor.id,
+            "actor_username": actor.username,
+            "actor_profile_picture": actor_profile_url,
+            # Group invite specific data
+            "invite_uuid": str(invite.uuid),
+            "group_uuid": str(group.uuid),
+            "group_name": group.name,
+            "group_cover_image": group_cover_url,
+            "expires_at": invite.expires_at.isoformat(),
+        }
+        await NotificationService.push_notification(recipient_id, notification_data)
+
+        return notification
 
 
 notification_service = NotificationService()

@@ -166,3 +166,50 @@ def verify_password_reset_token(token: str) -> Optional[str]:
         return None
 
     return payload.get("sub")
+
+
+def create_group_invite_token(invite_id: int, group_id: int, invitee_id: int) -> str:
+    """
+    Create a JWT token for group invite with 24h expiration.
+
+    Args:
+        invite_id: The invite ID
+        group_id: The group ID
+        invitee_id: The invited user ID
+
+    Returns:
+        Encoded JWT group invite token
+    """
+    expire = datetime.now(timezone.utc) + timedelta(hours=24)
+    to_encode = {
+        "invite_id": invite_id,
+        "group_id": group_id,
+        "invitee_id": invitee_id,
+        "exp": expire,
+        "type": "group_invite",
+    }
+    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def verify_group_invite_token(token: str) -> Optional[dict]:
+    """
+    Verify a group invite token and return the payload.
+
+    Args:
+        token: The JWT group invite token
+
+    Returns:
+        Dict with invite_id, group_id, invitee_id if valid, None otherwise
+    """
+    payload = decode_token(token)
+    if payload is None:
+        return None
+
+    if payload.get("type") != "group_invite":
+        return None
+
+    return {
+        "invite_id": payload.get("invite_id"),
+        "group_id": payload.get("group_id"),
+        "invitee_id": payload.get("invitee_id"),
+    }

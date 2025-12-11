@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 
@@ -54,6 +55,7 @@ class ReviewUpdate(BaseModel):
 class ReviewResponse(BaseModel):
     """Schema for review response."""
     id: int
+    uuid: UUID
     rating: int
     text: Optional[str]
     is_favorite: bool

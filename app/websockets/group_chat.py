@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from sqlalchemy import select
@@ -95,16 +96,25 @@ async def get_online_users_info(group_id: int, online_user_ids: list[int]) -> li
         return users_info
 
 
-@router.websocket("/ws/group/{group_id}")
+async def get_group_by_uuid(group_uuid: UUID) -> Group | None:
+    """Get group by UUID."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Group).where(Group.uuid == group_uuid)
+        )
+        return result.scalar_one_or_none()
+
+
+@router.websocket("/ws/group/{group_uuid}")
 async def group_chat_websocket(
     websocket: WebSocket,
-    group_id: int,
+    group_uuid: UUID,
     token: str = Query(...),
 ):
     """
     WebSocket endpoint for group chat.
 
-    Connect with: ws://host/ws/group/{group_id}?token=<jwt_token>
+    Connect with: ws://host/ws/group/{group_uuid}?token=<jwt_token>
 
     Message formats:
 
@@ -152,6 +162,15 @@ async def group_chat_websocket(
         await websocket.accept()
         await websocket.close(code=4001, reason="Invalid or expired token")
         return
+
+    # Get group by UUID
+    group = await get_group_by_uuid(group_uuid)
+    if not group:
+        await websocket.accept()
+        await websocket.close(code=4004, reason="Group not found")
+        return
+
+    group_id = group.id  # Use internal ID for all operations
 
     # Verify group membership
     is_member = await verify_group_membership(user.id, group_id)

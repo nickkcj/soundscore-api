@@ -1,4 +1,6 @@
-import uuid
+import uuid as uuid_module
+from uuid import UUID
+
 import httpx
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from sqlalchemy import select, func
@@ -6,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.user import User
 from app.config import get_settings
-from app.models.group import Group, GroupMember, GroupMessage
+from app.models.group import Group, GroupMember, GroupMessage, GroupInvite
 from app.schemas.group import (
     GroupCreate,
     GroupUpdate,
@@ -17,6 +19,10 @@ from app.schemas.group import (
     GroupMessageResponse,
     GroupMessageListResponse,
     GroupDetailResponse,
+    GroupInviteCreate,
+    GroupInviteResponse,
+    GroupInviteListResponse,
+    InviteActionResponse,
 )
 from app.schemas.auth import MessageResponse
 from app.core.exceptions import (
@@ -28,6 +34,10 @@ from app.core.exceptions import (
 from app.dependencies import CurrentUser, OptionalUser, DbSession
 from app.websockets.manager import manager
 from app.services.storage_service import StorageService
+from app.services.notification_service import NotificationService
+from app.core.security import create_group_invite_token
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import update
 
 router = APIRouter()
 
@@ -64,6 +74,7 @@ async def _build_group_response(group: Group, db: DbSession, user_id: int | None
 
     return GroupResponse(
         id=group.id,
+        uuid=group.uuid,
         name=group.name,
         description=group.description,
         privacy=group.privacy,
@@ -226,19 +237,19 @@ async def list_my_groups(
 
 
 @router.get(
-    "/{group_id}",
+    "/{group_uuid}",
     response_model=GroupDetailResponse,
     summary="Get group details",
 )
 async def get_group(
-    group_id: int,
+    group_uuid: UUID,
     db: DbSession,
     current_user: OptionalUser = None,
 ):
     """Get detailed group information including members and recent messages."""
     # Get group
     result = await db.execute(
-        select(Group).where(Group.id == group_id)
+        select(Group).where(Group.uuid == group_uuid)
     )
     group = result.scalar_one_or_none()
 
@@ -251,7 +262,7 @@ async def get_group(
     if current_user:
         member_result = await db.execute(
             select(GroupMember).where(
-                GroupMember.group_id == group_id,
+                GroupMember.group_id == group.id,
                 GroupMember.user_id == current_user.id
             )
         )
@@ -266,14 +277,14 @@ async def get_group(
     members_result = await db.execute(
         select(GroupMember)
         .options(selectinload(GroupMember.user))
-        .where(GroupMember.group_id == group_id)
+        .where(GroupMember.group_id == group.id)
         .order_by(GroupMember.joined_at)
         .limit(50)
     )
     members = members_result.scalars().all()
 
     # Get online users
-    online_user_ids = manager.get_online_users(group_id)
+    online_user_ids = manager.get_online_users(group.id)
 
     # Build member responses with resolved profile pictures
     member_responses = []
@@ -294,7 +305,7 @@ async def get_group(
     messages_result = await db.execute(
         select(GroupMessage)
         .options(selectinload(GroupMessage.user))
-        .where(GroupMessage.group_id == group_id)
+        .where(GroupMessage.group_id == group.id)
         .order_by(GroupMessage.created_at.desc())
         .limit(50)
     )
@@ -330,12 +341,12 @@ async def get_group(
 
 
 @router.patch(
-    "/{group_id}",
+    "/{group_uuid}",
     response_model=GroupResponse,
     summary="Update a group",
 )
 async def update_group(
-    group_id: int,
+    group_uuid: UUID,
     update_data: GroupUpdate,
     current_user: CurrentUser,
     db: DbSession,
@@ -343,7 +354,7 @@ async def update_group(
     """Update group settings. Only admins can update."""
     # Get group
     result = await db.execute(
-        select(Group).where(Group.id == group_id)
+        select(Group).where(Group.uuid == group_uuid)
     )
     group = result.scalar_one_or_none()
 
@@ -353,7 +364,7 @@ async def update_group(
     # Check if user is admin
     member_result = await db.execute(
         select(GroupMember).where(
-            GroupMember.group_id == group_id,
+            GroupMember.group_id == group.id,
             GroupMember.user_id == current_user.id,
             GroupMember.role == "admin"
         )
@@ -380,19 +391,19 @@ async def update_group(
 
 
 @router.delete(
-    "/{group_id}",
+    "/{group_uuid}",
     response_model=MessageResponse,
     summary="Delete a group",
 )
 async def delete_group(
-    group_id: int,
+    group_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
 ):
     """Delete a group. Only the creator can delete."""
     # Get group
     result = await db.execute(
-        select(Group).where(Group.id == group_id)
+        select(Group).where(Group.uuid == group_uuid)
     )
     group = result.scalar_one_or_none()
 
@@ -409,12 +420,12 @@ async def delete_group(
 
 
 @router.post(
-    "/{group_id}/cover",
+    "/{group_uuid}/cover",
     response_model=GroupResponse,
     summary="Upload group cover image",
 )
 async def upload_group_cover(
-    group_id: int,
+    group_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
     file: UploadFile = File(...),
@@ -430,7 +441,7 @@ async def upload_group_cover(
 
     # Get group
     result = await db.execute(
-        select(Group).where(Group.id == group_id)
+        select(Group).where(Group.uuid == group_uuid)
     )
     group = result.scalar_one_or_none()
 
@@ -440,7 +451,7 @@ async def upload_group_cover(
     # Check if user is admin
     member_result = await db.execute(
         select(GroupMember).where(
-            GroupMember.group_id == group_id,
+            GroupMember.group_id == group.id,
             GroupMember.user_id == current_user.id,
             GroupMember.role == "admin"
         )
@@ -481,7 +492,7 @@ async def upload_group_cover(
 
         # Generate unique filename
         file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
-        filename = f"{group_id}_{uuid.uuid4()}.{file_ext}"
+        filename = f"{group.id}_{uuid_module.uuid4()}.{file_ext}"
 
         # Upload to Supabase Storage via REST API
         upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
@@ -538,11 +549,11 @@ async def upload_group_cover(
 
 
 @router.post(
-    "/{group_id}/messages/image",
+    "/{group_uuid}/messages/image",
     summary="Upload image for group message",
 )
 async def upload_message_image(
-    group_id: int,
+    group_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
     file: UploadFile = File(...),
@@ -557,10 +568,18 @@ async def upload_message_image(
     """
     settings = get_settings()
 
+    # Get group
+    group_result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = group_result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
     # Verify membership
     member_result = await db.execute(
         select(GroupMember).where(
-            GroupMember.group_id == group_id,
+            GroupMember.group_id == group.id,
             GroupMember.user_id == current_user.id
         )
     )
@@ -600,7 +619,7 @@ async def upload_message_image(
 
         # Generate unique filename
         file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
-        filename = f"{group_id}/{current_user.id}_{uuid.uuid4()}.{file_ext}"
+        filename = f"{group.id}/{current_user.id}_{uuid_module.uuid4()}.{file_ext}"
 
         # Upload to Supabase Storage via REST API
         upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
@@ -640,19 +659,19 @@ async def upload_message_image(
 # ============== Membership ==============
 
 @router.post(
-    "/{group_id}/join",
+    "/{group_uuid}/join",
     response_model=MessageResponse,
     summary="Join a group",
 )
 async def join_group(
-    group_id: int,
+    group_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
 ):
     """Join a public group."""
     # Get group
     result = await db.execute(
-        select(Group).where(Group.id == group_id)
+        select(Group).where(Group.uuid == group_uuid)
     )
     group = result.scalar_one_or_none()
 
@@ -665,7 +684,7 @@ async def join_group(
     # Check if already a member
     existing = await db.execute(
         select(GroupMember).where(
-            GroupMember.group_id == group_id,
+            GroupMember.group_id == group.id,
             GroupMember.user_id == current_user.id
         )
     )
@@ -674,7 +693,7 @@ async def join_group(
 
     # Add as member
     member = GroupMember(
-        group_id=group_id,
+        group_id=group.id,
         user_id=current_user.id,
         role="member",
     )
@@ -683,14 +702,14 @@ async def join_group(
     await db.refresh(member)
 
     # Get new member count
-    member_count = await _get_group_member_count(db, group_id)
+    member_count = await _get_group_member_count(db, group.id)
 
     # Resolve profile picture for broadcast
     profile_picture = await StorageService.resolve_profile_picture(current_user.profile_picture)
 
     # Broadcast to all connected users in the group
     await manager.broadcast_to_group(
-        group_id,
+        group.id,
         {
             "type": "member_joined",
             "user_id": current_user.id,
@@ -706,20 +725,28 @@ async def join_group(
 
 
 @router.post(
-    "/{group_id}/leave",
+    "/{group_uuid}/leave",
     response_model=MessageResponse,
     summary="Leave a group",
 )
 async def leave_group(
-    group_id: int,
+    group_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
 ):
     """Leave a group."""
+    # Get group
+    group_result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = group_result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
     # Get membership
     result = await db.execute(
         select(GroupMember).where(
-            GroupMember.group_id == group_id,
+            GroupMember.group_id == group.id,
             GroupMember.user_id == current_user.id
         )
     )
@@ -727,12 +754,6 @@ async def leave_group(
 
     if not membership:
         raise BadRequestException("Not a member of this group")
-
-    # Get group to check if user is creator
-    group_result = await db.execute(
-        select(Group).where(Group.id == group_id)
-    )
-    group = group_result.scalar_one()
 
     if group.created_by_id == current_user.id:
         raise BadRequestException("Group creator cannot leave. Delete the group instead.")
@@ -744,19 +765,19 @@ async def leave_group(
 
 
 @router.get(
-    "/{group_id}/members",
+    "/{group_uuid}/members",
     response_model=GroupMemberListResponse,
     summary="Get group members",
 )
 async def get_group_members(
-    group_id: int,
+    group_uuid: UUID,
     db: DbSession,
     current_user: OptionalUser = None,
 ):
     """Get all members of a group."""
     # Get group
     result = await db.execute(
-        select(Group).where(Group.id == group_id)
+        select(Group).where(Group.uuid == group_uuid)
     )
     group = result.scalar_one_or_none()
 
@@ -767,7 +788,7 @@ async def get_group_members(
     if group.privacy == "private" and current_user:
         member_check = await db.execute(
             select(GroupMember).where(
-                GroupMember.group_id == group_id,
+                GroupMember.group_id == group.id,
                 GroupMember.user_id == current_user.id
             )
         )
@@ -778,13 +799,13 @@ async def get_group_members(
     members_result = await db.execute(
         select(GroupMember)
         .options(selectinload(GroupMember.user))
-        .where(GroupMember.group_id == group_id)
+        .where(GroupMember.group_id == group.id)
         .order_by(GroupMember.joined_at)
     )
     members = members_result.scalars().all()
 
     # Get online users
-    online_user_ids = manager.get_online_users(group_id)
+    online_user_ids = manager.get_online_users(group.id)
 
     # Build member responses with resolved profile pictures
     member_responses = []
@@ -810,22 +831,30 @@ async def get_group_members(
 # ============== Messages ==============
 
 @router.get(
-    "/{group_id}/messages",
+    "/{group_uuid}/messages",
     response_model=GroupMessageListResponse,
     summary="Get group messages",
 )
 async def get_group_messages(
-    group_id: int,
+    group_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
 ):
     """Get paginated messages for a group. Must be a member."""
+    # Get group
+    group_result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = group_result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
     # Verify membership
     member_result = await db.execute(
         select(GroupMember).where(
-            GroupMember.group_id == group_id,
+            GroupMember.group_id == group.id,
             GroupMember.user_id == current_user.id
         )
     )
@@ -835,7 +864,7 @@ async def get_group_messages(
     # Get total
     total_result = await db.execute(
         select(func.count()).select_from(GroupMessage).where(
-            GroupMessage.group_id == group_id
+            GroupMessage.group_id == group.id
         )
     )
     total = total_result.scalar() or 0
@@ -845,7 +874,7 @@ async def get_group_messages(
     result = await db.execute(
         select(GroupMessage)
         .options(selectinload(GroupMessage.user))
-        .where(GroupMessage.group_id == group_id)
+        .where(GroupMessage.group_id == group.id)
         .order_by(GroupMessage.created_at.desc())
         .offset(offset)
         .limit(per_page)
@@ -878,4 +907,383 @@ async def get_group_messages(
         page=page,
         per_page=per_page,
         has_next=offset + per_page < total,
+    )
+
+
+# ============== Group Invites ==============
+
+async def _build_invite_response(invite: GroupInvite, db: DbSession) -> GroupInviteResponse:
+    """Build a GroupInviteResponse with resolved URLs."""
+    # Get group info
+    group_result = await db.execute(
+        select(Group).where(Group.id == invite.group_id)
+    )
+    group = group_result.scalar_one()
+
+    # Get invitee info
+    invitee_result = await db.execute(
+        select(User).where(User.id == invite.invitee_id)
+    )
+    invitee = invitee_result.scalar_one()
+
+    # Get inviter info
+    inviter_result = await db.execute(
+        select(User).where(User.id == invite.inviter_id)
+    )
+    inviter = inviter_result.scalar_one()
+
+    # Resolve URLs
+    inviter_profile_url = await StorageService.resolve_profile_picture(inviter.profile_picture)
+    group_cover_url = None
+    if group.cover_image:
+        group_cover_url = await StorageService.get_signed_url(group.cover_image, expires_in=3600)
+
+    return GroupInviteResponse(
+        id=invite.id,
+        uuid=invite.uuid,
+        group_id=group.id,
+        group_name=group.name,
+        group_uuid=group.uuid,
+        group_cover_image=group_cover_url,
+        invitee_id=invitee.id,
+        invitee_username=invitee.username,
+        inviter_id=inviter.id,
+        inviter_username=inviter.username,
+        inviter_profile_picture=inviter_profile_url,
+        status=invite.status,
+        created_at=invite.created_at,
+        expires_at=invite.expires_at,
+    )
+
+
+@router.post(
+    "/{group_uuid}/invites",
+    response_model=GroupInviteResponse,
+    status_code=201,
+    summary="Create group invite (admin only)",
+)
+async def create_invite(
+    group_uuid: UUID,
+    invite_data: GroupInviteCreate,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """
+    Create an invite to a private group.
+
+    - Only admins can invite
+    - Only works for private groups
+    - Prevents duplicate pending invites
+    - Prevents inviting existing members
+    - Link expires in 24 hours
+    """
+    # 1. Get group
+    result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
+    if group.privacy != "private":
+        raise BadRequestException("Invites are only for private groups")
+
+    # 2. Verify caller is admin
+    admin_check = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group.id,
+            GroupMember.user_id == current_user.id,
+            GroupMember.role == "admin"
+        )
+    )
+    if not admin_check.scalar_one_or_none():
+        raise ForbiddenException("Only admins can send invites")
+
+    # 3. Get invitee by username
+    invitee_result = await db.execute(
+        select(User).where(User.username == invite_data.invitee_username.lower())
+    )
+    invitee = invitee_result.scalar_one_or_none()
+    if not invitee:
+        raise NotFoundException("User not found")
+
+    if invitee.id == current_user.id:
+        raise BadRequestException("You cannot invite yourself")
+
+    # 4. Check if already a member
+    existing_member = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group.id,
+            GroupMember.user_id == invitee.id
+        )
+    )
+    if existing_member.scalar_one_or_none():
+        raise ConflictException("User is already a member")
+
+    # 5. Check for pending invite
+    existing_invite = await db.execute(
+        select(GroupInvite).where(
+            GroupInvite.group_id == group.id,
+            GroupInvite.invitee_id == invitee.id,
+            GroupInvite.status == "pending"
+        )
+    )
+    if existing_invite.scalar_one_or_none():
+        raise ConflictException("User already has a pending invite")
+
+    # 6. Create invite with token
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    invite = GroupInvite(
+        group_id=group.id,
+        invitee_id=invitee.id,
+        inviter_id=current_user.id,
+        token="",  # Will update after flush to get ID
+        expires_at=expires_at,
+    )
+    db.add(invite)
+    await db.flush()
+
+    # Generate token with invite ID
+    invite.token = create_group_invite_token(invite.id, group.id, invitee.id)
+
+    await db.commit()
+    await db.refresh(invite)
+
+    # 7. Create notification
+    await NotificationService.create_group_invite_notification(
+        db=db,
+        actor=current_user,
+        group=group,
+        invite=invite,
+        recipient_id=invitee.id,
+    )
+
+    return await _build_invite_response(invite, db)
+
+
+@router.get(
+    "/{group_uuid}/invites",
+    response_model=GroupInviteListResponse,
+    summary="List pending invites for a group (admin only)",
+)
+async def list_group_invites(
+    group_uuid: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """List all pending invites for a group. Admin only."""
+    # Get group
+    result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
+    # Verify caller is admin
+    admin_check = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group.id,
+            GroupMember.user_id == current_user.id,
+            GroupMember.role == "admin"
+        )
+    )
+    if not admin_check.scalar_one_or_none():
+        raise ForbiddenException("Only admins can view invites")
+
+    # Mark expired invites
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(GroupInvite)
+        .where(
+            GroupInvite.group_id == group.id,
+            GroupInvite.status == "pending",
+            GroupInvite.expires_at < now
+        )
+        .values(status="expired")
+    )
+    await db.commit()
+
+    # Get pending invites
+    result = await db.execute(
+        select(GroupInvite)
+        .where(
+            GroupInvite.group_id == group.id,
+            GroupInvite.status == "pending"
+        )
+        .order_by(GroupInvite.created_at.desc())
+    )
+    invites = result.scalars().all()
+
+    invite_responses = []
+    for invite in invites:
+        invite_responses.append(await _build_invite_response(invite, db))
+
+    return GroupInviteListResponse(
+        invites=invite_responses,
+        total=len(invite_responses)
+    )
+
+
+@router.get(
+    "/invites/pending",
+    response_model=GroupInviteListResponse,
+    summary="Get my pending invites",
+)
+async def get_my_pending_invites(
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """Get all pending invites for current user."""
+    now = datetime.now(timezone.utc)
+
+    # Mark expired invites
+    await db.execute(
+        update(GroupInvite)
+        .where(
+            GroupInvite.invitee_id == current_user.id,
+            GroupInvite.status == "pending",
+            GroupInvite.expires_at < now
+        )
+        .values(status="expired")
+    )
+    await db.commit()
+
+    # Get pending invites
+    result = await db.execute(
+        select(GroupInvite)
+        .where(
+            GroupInvite.invitee_id == current_user.id,
+            GroupInvite.status == "pending"
+        )
+        .order_by(GroupInvite.created_at.desc())
+    )
+    invites = result.scalars().all()
+
+    invite_responses = []
+    for invite in invites:
+        invite_responses.append(await _build_invite_response(invite, db))
+
+    return GroupInviteListResponse(
+        invites=invite_responses,
+        total=len(invite_responses)
+    )
+
+
+@router.post(
+    "/invites/{invite_uuid}/accept",
+    response_model=InviteActionResponse,
+    summary="Accept a group invite",
+)
+async def accept_invite(
+    invite_uuid: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """
+    Accept a group invite.
+
+    - Only the invitee can accept
+    - Invite must be pending and not expired
+    - User becomes a member with role "member"
+    """
+    # Get invite
+    result = await db.execute(
+        select(GroupInvite).where(GroupInvite.uuid == invite_uuid)
+    )
+    invite = result.scalar_one_or_none()
+    if not invite:
+        raise NotFoundException("Invite not found")
+
+    if invite.invitee_id != current_user.id:
+        raise ForbiddenException("This invite is not for you")
+
+    if invite.status != "pending":
+        raise BadRequestException(f"Invite already {invite.status}")
+
+    if datetime.now(timezone.utc) > invite.expires_at:
+        invite.status = "expired"
+        await db.commit()
+        raise BadRequestException("Invite has expired")
+
+    # Add as member
+    member = GroupMember(
+        group_id=invite.group_id,
+        user_id=current_user.id,
+        role="member",
+    )
+    db.add(member)
+
+    # Update invite status
+    invite.status = "accepted"
+    invite.responded_at = datetime.now(timezone.utc)
+
+    await db.commit()
+
+    # Get group for response
+    group_result = await db.execute(
+        select(Group).where(Group.id == invite.group_id)
+    )
+    group = group_result.scalar_one()
+
+    # Get new member count
+    member_count = await _get_group_member_count(db, group.id)
+
+    # Resolve profile picture for broadcast
+    profile_picture = await StorageService.resolve_profile_picture(current_user.profile_picture)
+
+    # Broadcast to all connected users in the group
+    await manager.broadcast_to_group(
+        group.id,
+        {
+            "type": "member_joined",
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "profile_picture": profile_picture,
+            "role": "member",
+            "joined_at": member.joined_at.isoformat(),
+            "member_count": member_count,
+        },
+    )
+
+    return InviteActionResponse(
+        success=True,
+        message=f"Joined group '{group.name}'",
+        group_uuid=group.uuid,
+    )
+
+
+@router.post(
+    "/invites/{invite_uuid}/decline",
+    response_model=InviteActionResponse,
+    summary="Decline a group invite",
+)
+async def decline_invite(
+    invite_uuid: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """Decline a group invite."""
+    # Get invite
+    result = await db.execute(
+        select(GroupInvite).where(GroupInvite.uuid == invite_uuid)
+    )
+    invite = result.scalar_one_or_none()
+    if not invite:
+        raise NotFoundException("Invite not found")
+
+    if invite.invitee_id != current_user.id:
+        raise ForbiddenException("This invite is not for you")
+
+    if invite.status != "pending":
+        raise BadRequestException(f"Invite already {invite.status}")
+
+    invite.status = "declined"
+    invite.responded_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return InviteActionResponse(
+        success=True,
+        message="Invite declined",
     )

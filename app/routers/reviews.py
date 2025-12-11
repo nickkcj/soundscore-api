@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
@@ -75,6 +77,7 @@ async def _build_review_response(
 
     return ReviewResponse(
         id=review.id,
+        uuid=review.uuid,
         rating=review.rating,
         text=review.text,
         is_favorite=review.is_favorite,
@@ -420,20 +423,20 @@ async def create_review(
 
 
 @router.get(
-    "/{review_id}",
+    "/{review_uuid}",
     response_model=ReviewResponse,
-    summary="Get a review by ID",
+    summary="Get a review by UUID",
 )
 async def get_review(
-    review_id: int,
+    review_uuid: UUID,
     db: DbSession,
     current_user: OptionalUser = None,
 ):
-    """Get a single review by ID."""
+    """Get a single review by UUID."""
     result = await db.execute(
         select(Review)
         .options(selectinload(Review.user), selectinload(Review.album))
-        .where(Review.id == review_id)
+        .where(Review.uuid == review_uuid)
     )
     review = result.scalar_one_or_none()
 
@@ -447,12 +450,12 @@ async def get_review(
 
 
 @router.patch(
-    "/{review_id}",
+    "/{review_uuid}",
     response_model=ReviewResponse,
     summary="Update a review",
 )
 async def update_review(
-    review_id: int,
+    review_uuid: UUID,
     update_data: ReviewUpdate,
     current_user: CurrentUser,
     db: DbSession,
@@ -465,7 +468,7 @@ async def update_review(
     result = await db.execute(
         select(Review)
         .options(selectinload(Review.user), selectinload(Review.album))
-        .where(Review.id == review_id)
+        .where(Review.uuid == review_uuid)
     )
     review = result.scalar_one_or_none()
 
@@ -490,12 +493,12 @@ async def update_review(
 
 
 @router.delete(
-    "/{review_id}",
+    "/{review_uuid}",
     response_model=MessageResponse,
     summary="Delete a review",
 )
 async def delete_review(
-    review_id: int,
+    review_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
 ):
@@ -505,7 +508,7 @@ async def delete_review(
     Only the review author can delete.
     """
     result = await db.execute(
-        select(Review).where(Review.id == review_id)
+        select(Review).where(Review.uuid == review_uuid)
     )
     review = result.scalar_one_or_none()
 
@@ -659,13 +662,13 @@ async def get_album_reviews(
 # ============== Comments ==============
 
 @router.post(
-    "/{review_id}/comments",
+    "/{review_uuid}/comments",
     response_model=CommentResponse,
     status_code=201,
     summary="Add a comment to a review",
 )
 async def create_comment(
-    review_id: int,
+    review_uuid: UUID,
     comment_data: CommentCreate,
     current_user: CurrentUser,
     db: DbSession,
@@ -673,7 +676,7 @@ async def create_comment(
     """Add a comment to a review. Supports nested replies via parent_id."""
     # Verify review exists
     review_result = await db.execute(
-        select(Review).where(Review.id == review_id)
+        select(Review).where(Review.uuid == review_uuid)
     )
     review = review_result.scalar_one_or_none()
     if not review:
@@ -685,7 +688,7 @@ async def create_comment(
         parent_result = await db.execute(
             select(Comment).where(
                 Comment.id == comment_data.parent_id,
-                Comment.review_id == review_id
+                Comment.review_id == review.id
             )
         )
         parent_comment = parent_result.scalar_one_or_none()
@@ -695,7 +698,7 @@ async def create_comment(
     # Create comment
     comment = Comment(
         user_id=current_user.id,
-        review_id=review_id,
+        review_id=review.id,
         text=comment_data.text,
         parent_id=comment_data.parent_id,
     )
@@ -739,12 +742,12 @@ async def create_comment(
 
 
 @router.get(
-    "/{review_id}/comments",
+    "/{review_uuid}/comments",
     response_model=CommentListResponse,
     summary="Get comments for a review",
 )
 async def get_review_comments(
-    review_id: int,
+    review_uuid: UUID,
     db: DbSession,
     current_user: OptionalUser = None,
     page: int = Query(1, ge=1),
@@ -753,15 +756,16 @@ async def get_review_comments(
     """Get top-level comments for a review with nested replies."""
     # Verify review exists
     review_result = await db.execute(
-        select(Review).where(Review.id == review_id)
+        select(Review).where(Review.uuid == review_uuid)
     )
-    if not review_result.scalar_one_or_none():
+    review = review_result.scalar_one_or_none()
+    if not review:
         raise NotFoundException("Review not found")
 
     # Get total top-level comments
     total_result = await db.execute(
         select(func.count()).select_from(Comment).where(
-            Comment.review_id == review_id,
+            Comment.review_id == review.id,
             Comment.parent_id == None
         )
     )
@@ -776,7 +780,7 @@ async def get_review_comments(
             selectinload(Comment.replies).selectinload(Comment.user)
         )
         .where(
-            Comment.review_id == review_id,
+            Comment.review_id == review.id,
             Comment.parent_id == None
         )
         .order_by(Comment.created_at.desc())
@@ -863,21 +867,29 @@ async def get_review_comments(
 
 
 @router.delete(
-    "/{review_id}/comments/{comment_id}",
+    "/{review_uuid}/comments/{comment_id}",
     response_model=MessageResponse,
     summary="Delete a comment",
 )
 async def delete_comment(
-    review_id: int,
+    review_uuid: UUID,
     comment_id: int,
     current_user: CurrentUser,
     db: DbSession,
 ):
     """Delete a comment. Only the comment author can delete."""
+    # Verify review exists
+    review_result = await db.execute(
+        select(Review).where(Review.uuid == review_uuid)
+    )
+    review = review_result.scalar_one_or_none()
+    if not review:
+        raise NotFoundException("Review not found")
+
     result = await db.execute(
         select(Comment).where(
             Comment.id == comment_id,
-            Comment.review_id == review_id
+            Comment.review_id == review.id
         )
     )
     comment = result.scalar_one_or_none()
@@ -895,22 +907,30 @@ async def delete_comment(
 
 
 @router.post(
-    "/{review_id}/comments/{comment_id}/like",
+    "/{review_uuid}/comments/{comment_id}/like",
     response_model=LikeResponse,
     summary="Toggle like on a comment",
 )
 async def toggle_comment_like(
-    review_id: int,
+    review_uuid: UUID,
     comment_id: int,
     current_user: CurrentUser,
     db: DbSession,
 ):
     """Toggle like on a comment. If already liked, removes the like."""
+    # Verify review exists
+    review_result = await db.execute(
+        select(Review).where(Review.uuid == review_uuid)
+    )
+    review = review_result.scalar_one_or_none()
+    if not review:
+        raise NotFoundException("Review not found")
+
     # Verify comment exists
     comment_result = await db.execute(
         select(Comment).where(
             Comment.id == comment_id,
-            Comment.review_id == review_id
+            Comment.review_id == review.id
         )
     )
     comment = comment_result.scalar_one_or_none()
@@ -950,19 +970,19 @@ async def toggle_comment_like(
 # ============== Likes ==============
 
 @router.post(
-    "/{review_id}/like",
+    "/{review_uuid}/like",
     response_model=LikeResponse,
     summary="Toggle like on a review",
 )
 async def toggle_like(
-    review_id: int,
+    review_uuid: UUID,
     current_user: CurrentUser,
     db: DbSession,
 ):
     """Toggle like on a review. If already liked, removes the like."""
     # Verify review exists
     review_result = await db.execute(
-        select(Review).where(Review.id == review_id)
+        select(Review).where(Review.uuid == review_uuid)
     )
     review = review_result.scalar_one_or_none()
     if not review:
@@ -971,7 +991,7 @@ async def toggle_like(
     # Check existing like
     like_result = await db.execute(
         select(ReviewLike).where(
-            ReviewLike.review_id == review_id,
+            ReviewLike.review_id == review.id,
             ReviewLike.user_id == current_user.id
         )
     )
@@ -985,7 +1005,7 @@ async def toggle_like(
         # Like
         new_like = ReviewLike(
             user_id=current_user.id,
-            review_id=review_id,
+            review_id=review.id,
         )
         db.add(new_like)
         liked = True
@@ -1001,7 +1021,7 @@ async def toggle_like(
 
     # Get updated count
     count_result = await db.execute(
-        select(func.count()).select_from(ReviewLike).where(ReviewLike.review_id == review_id)
+        select(func.count()).select_from(ReviewLike).where(ReviewLike.review_id == review.id)
     )
     like_count = count_result.scalar() or 0
 

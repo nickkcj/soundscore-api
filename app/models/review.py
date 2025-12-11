@@ -1,7 +1,9 @@
+import uuid as uuid_lib
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import String, Integer, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -40,6 +42,13 @@ class Review(Base):
     __tablename__ = "reviews"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        default=uuid_lib.uuid4,
+        unique=True,
+        index=True,
+        nullable=False
+    )
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True

@@ -9,6 +9,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.review import Review, Comment
+    from app.models.group import GroupInvite
 
 
 class Notification(Base):
@@ -44,6 +45,11 @@ class Notification(Base):
         nullable=True,
         index=True
     )
+    group_invite_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("group_invites.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
 
     # Notification message
     message: Mapped[str] = mapped_column(Text)
@@ -69,6 +75,7 @@ class Notification(Base):
     )
     review: Mapped[Optional["Review"]] = relationship(back_populates="notifications")
     comment: Mapped[Optional["Comment"]] = relationship(back_populates="notifications")
+    group_invite: Mapped[Optional["GroupInvite"]] = relationship()
 
     def __repr__(self) -> str:
         return f"<Notification {self.notification_type} for {self.recipient_id}>"

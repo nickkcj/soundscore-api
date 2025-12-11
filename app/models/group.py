@@ -1,7 +1,9 @@
+import uuid as uuid_lib
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import String, Text, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,6 +18,13 @@ class Group(Base):
     __tablename__ = "groups"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        default=uuid_lib.uuid4,
+        unique=True,
+        index=True,
+        nullable=False
+    )
     name: Mapped[str] = mapped_column(String(100), index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -91,6 +100,71 @@ class GroupMember(Base):
 
     def __repr__(self) -> str:
         return f"<GroupMember {self.user_id} in {self.group_id}>"
+
+
+class GroupInvite(Base):
+    """Invite to join a private group."""
+
+    __tablename__ = "group_invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        default=uuid_lib.uuid4,
+        unique=True,
+        index=True,
+        nullable=False
+    )
+
+    # Group being invited to
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        index=True
+    )
+
+    # User invited
+    invitee_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True
+    )
+
+    # User who sent the invite (admin)
+    inviter_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True
+    )
+
+    # Token for URL validation (unique per invite)
+    token: Mapped[str] = mapped_column(String(500), unique=True, index=True)
+
+    # Status: pending, accepted, declined, expired
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        index=True
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+    responded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    # Relationships
+    group: Mapped["Group"] = relationship("Group")
+    invitee: Mapped["User"] = relationship("User", foreign_keys=[invitee_id])
+    inviter: Mapped["User"] = relationship("User", foreign_keys=[inviter_id])
+
+    def __repr__(self) -> str:
+        return f"<GroupInvite {self.uuid} to group {self.group_id}>"
 
 
 class GroupMessage(Base):

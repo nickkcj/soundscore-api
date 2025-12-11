@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 from pydantic import BaseModel
 
 from app.schemas.review import ReviewResponse
@@ -22,6 +23,7 @@ class NotificationResponse(BaseModel):
 
     # Related content (optional)
     review_id: Optional[int] = None
+    review_uuid: Optional[UUID] = None
     comment_id: Optional[int] = None
 
     model_config = {"from_attributes": True}

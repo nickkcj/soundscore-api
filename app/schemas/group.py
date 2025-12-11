@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 
@@ -25,6 +26,7 @@ class GroupUpdate(BaseModel):
 class GroupResponse(BaseModel):
     """Schema for group response."""
     id: int
+    uuid: UUID
     name: str
     description: Optional[str]
     privacy: str
@@ -132,3 +134,43 @@ class WSMessageOut(BaseModel):
     message_id: Optional[int] = None
     timestamp: Optional[str] = None
     online_users: Optional[list[dict]] = None
+
+
+# ============== Group Invite Schemas ==============
+
+class GroupInviteCreate(BaseModel):
+    """Schema for creating a group invite."""
+    invitee_username: str = Field(..., min_length=1, max_length=50)
+
+
+class GroupInviteResponse(BaseModel):
+    """Schema for group invite response."""
+    id: int
+    uuid: UUID
+    group_id: int
+    group_name: str
+    group_uuid: UUID
+    group_cover_image: Optional[str]
+    invitee_id: int
+    invitee_username: str
+    inviter_id: int
+    inviter_username: str
+    inviter_profile_picture: Optional[str]
+    status: str
+    created_at: datetime
+    expires_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class GroupInviteListResponse(BaseModel):
+    """Schema for paginated invite list."""
+    invites: list[GroupInviteResponse]
+    total: int
+
+
+class InviteActionResponse(BaseModel):
+    """Response for accept/decline invite."""
+    success: bool
+    message: str
+    group_uuid: Optional[UUID] = None
