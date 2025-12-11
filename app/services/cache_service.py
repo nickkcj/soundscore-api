@@ -2,7 +2,9 @@
 Redis Cache Service for SoundScore.
 
 Provides a simple interface for caching data with TTL support.
+Thread-safe singleton pattern to avoid race conditions.
 """
+import asyncio
 import json
 from typing import Any
 
@@ -12,20 +14,51 @@ from app.config import get_settings
 
 
 class CacheService:
-    """Redis cache service with async support."""
+    """Redis cache service with async support and thread-safe initialization."""
 
     _client: redis.Redis | None = None
+    _lock: asyncio.Lock | None = None
+    _initialized: bool = False
 
     @classmethod
-    async def get_client(cls) -> redis.Redis:
-        """Get or create Redis client connection."""
-        if cls._client is None:
+    async def _get_lock(cls) -> asyncio.Lock:
+        """Get or create the initialization lock."""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
+
+    @classmethod
+    async def initialize(cls) -> None:
+        """
+        Initialize the Redis client. Should be called once at startup.
+        Thread-safe using asyncio.Lock to prevent race conditions.
+        """
+        if cls._initialized:
+            return
+
+        lock = await cls._get_lock()
+        async with lock:
+            # Double-check after acquiring lock
+            if cls._initialized:
+                return
+
             settings = get_settings()
             cls._client = redis.from_url(
                 settings.redis_url,
                 encoding="utf-8",
                 decode_responses=True,
+                socket_timeout=5.0,        # 5s socket timeout
+                socket_connect_timeout=5.0, # 5s connect timeout
+                retry_on_timeout=True,      # Retry on timeout
+                health_check_interval=30,   # Health check every 30s
             )
+            cls._initialized = True
+
+    @classmethod
+    async def get_client(cls) -> redis.Redis:
+        """Get Redis client connection. Initializes if needed."""
+        if not cls._initialized or cls._client is None:
+            await cls.initialize()
         return cls._client
 
     @classmethod
@@ -111,10 +144,11 @@ class CacheService:
 
     @classmethod
     async def close(cls) -> None:
-        """Close Redis connection."""
+        """Close Redis connection and reset state."""
         if cls._client:
             await cls._client.close()
             cls._client = None
+            cls._initialized = False
 
 
 # Cache key prefixes

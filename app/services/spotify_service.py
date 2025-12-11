@@ -3,17 +3,16 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import httpx
-
 from app.config import get_settings
 from app.schemas.review import SpotifyAlbumResult
 from app.services.cache_service import CacheService, CacheKeys
+from app.services.http_client import get_http_client
 
 settings = get_settings()
 
 
 class SpotifyService:
-    """Service for interacting with Spotify API."""
+    """Service for interacting with Spotify API using global HTTP client."""
 
     TOKEN_URL = "https://accounts.spotify.com/api/token"
     API_BASE_URL = "https://api.spotify.com/v1"
@@ -36,17 +35,17 @@ class SpotifyService:
         credentials = f"{settings.spotify_client_id}:{settings.spotify_client_secret}"
         encoded_credentials = base64.b64encode(credentials.encode()).decode()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.TOKEN_URL,
-                headers={
-                    "Authorization": f"Basic {encoded_credentials}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={"grant_type": "client_credentials"},
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = get_http_client()
+        response = await client.post(
+            self.TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {encoded_credentials}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={"grant_type": "client_credentials"},
+        )
+        response.raise_for_status()
+        data = response.json()
 
         self._access_token = data["access_token"]
         # Set expiry 5 minutes before actual expiry for safety
@@ -79,18 +78,18 @@ class SpotifyService:
 
         token = await self._get_access_token()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.API_BASE_URL}/search",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "q": query,
-                    "type": "album",
-                    "limit": min(limit, 50),
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = get_http_client()
+        response = await client.get(
+            f"{self.API_BASE_URL}/search",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "q": query,
+                "type": "album",
+                "limit": min(limit, 50),
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         albums = []
         for item in data.get("albums", {}).get("items", []):
@@ -125,17 +124,17 @@ class SpotifyService:
         """
         token = await self._get_access_token()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.API_BASE_URL}/albums/{spotify_id}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
+        client = get_http_client()
+        response = await client.get(
+            f"{self.API_BASE_URL}/albums/{spotify_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
-            if response.status_code == 404:
-                return None
+        if response.status_code == 404:
+            return None
 
-            response.raise_for_status()
-            item = response.json()
+        response.raise_for_status()
+        item = response.json()
 
         return SpotifyAlbumResult(
             spotify_id=item["id"],
@@ -157,18 +156,18 @@ class SpotifyService:
         """
         token = await self._get_access_token()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.API_BASE_URL}/albums/{spotify_id}/tracks",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"limit": 50},
-            )
+        client = get_http_client()
+        response = await client.get(
+            f"{self.API_BASE_URL}/albums/{spotify_id}/tracks",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"limit": 50},
+        )
 
-            if response.status_code == 404:
-                return []
+        if response.status_code == 404:
+            return []
 
-            response.raise_for_status()
-            data = response.json()
+        response.raise_for_status()
+        data = response.json()
 
         tracks = []
         for item in data.get("items", []):
@@ -199,18 +198,18 @@ class SpotifyService:
 
         token = await self._get_access_token()
 
-        async with httpx.AsyncClient() as client:
-            # Fetch album details
-            response = await client.get(
-                f"{self.API_BASE_URL}/albums/{spotify_id}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
+        client = get_http_client()
+        # Fetch album details
+        response = await client.get(
+            f"{self.API_BASE_URL}/albums/{spotify_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
-            if response.status_code == 404:
-                return None
+        if response.status_code == 404:
+            return None
 
-            response.raise_for_status()
-            album_data = response.json()
+        response.raise_for_status()
+        album_data = response.json()
 
         # Extract album info
         album_details = {

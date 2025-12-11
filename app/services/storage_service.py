@@ -1,6 +1,6 @@
-import httpx
 from app.config import get_settings
 from app.services.cache_service import CacheService, CacheKeys
+from app.services.http_client import get_http_client
 
 
 class StorageService:
@@ -10,6 +10,7 @@ class StorageService:
     async def get_signed_url(path: str, expires_in: int = 3600) -> str | None:
         """
         Generate a signed URL for a storage object.
+        Uses the global HTTP client for connection pooling.
 
         Args:
             path: The storage path (e.g., 'profile_pictures/1_uuid.webp')
@@ -37,24 +38,24 @@ class StorageService:
         bucket, file_path = parts
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{settings.supabase_url}/storage/v1/object/sign/{bucket}/{file_path}",
-                    json={"expiresIn": expires_in},
-                    headers={
-                        "Authorization": f"Bearer {storage_key}",
-                        "apikey": storage_key,
-                        "Content-Type": "application/json",
-                    },
-                )
+            client = get_http_client()
+            response = await client.post(
+                f"{settings.supabase_url}/storage/v1/object/sign/{bucket}/{file_path}",
+                json={"expiresIn": expires_in},
+                headers={
+                    "Authorization": f"Bearer {storage_key}",
+                    "apikey": storage_key,
+                    "Content-Type": "application/json",
+                },
+            )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    signed_path = data.get("signedURL", "")
-                    if signed_path:
-                        return f"{settings.supabase_url}/storage/v1{signed_path}"
+            if response.status_code == 200:
+                data = response.json()
+                signed_path = data.get("signedURL", "")
+                if signed_path:
+                    return f"{settings.supabase_url}/storage/v1{signed_path}"
 
-                return None
+            return None
         except Exception:
             return None
 

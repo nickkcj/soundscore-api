@@ -1,25 +1,78 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import get_settings
 from app.routers import auth, users, reviews, feed, groups, chatbot, home
 from app.websockets import group_chat
+from app.services.cache_service import CacheService
+from app.services.http_client import HTTPClientManager
+from app.database import engine
 
 settings = get_settings()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO if not settings.debug else logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for startup/shutdown events.
+    Performs warmup to reduce cold start latency.
     """
-    # Startup
-    print(f"🚀 Starting {settings.app_name}...")
+    # Startup - warmup all connections
+    logger.info(f"🚀 Starting {settings.app_name}...")
+
+    # 1. Warmup database connection pool
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("✅ Database pool warmed up")
+    except Exception as e:
+        logger.error(f"❌ Database warmup failed: {e}")
+
+    # 2. Warmup Redis connection
+    try:
+        await CacheService.initialize()
+        client = await CacheService.get_client()
+        await client.ping()
+        logger.info("✅ Redis connection warmed up")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis warmup failed (will use fallback): {e}")
+
+    # 3. Warmup HTTP client pool
+    try:
+        await HTTPClientManager.warmup()
+        logger.info("✅ HTTP client pool warmed up")
+    except Exception as e:
+        logger.warning(f"⚠️ HTTP client warmup failed: {e}")
+
+    logger.info("🎵 SoundScore API ready to serve requests!")
+
     yield
-    # Shutdown
-    print(f"👋 Shutting down {settings.app_name}...")
+
+    # Shutdown - cleanup connections
+    logger.info(f"👋 Shutting down {settings.app_name}...")
+
+    # Close HTTP client
+    await HTTPClientManager.close()
+    logger.info("✅ HTTP client closed")
+
+    # Close Redis
+    await CacheService.close()
+    logger.info("✅ Redis connection closed")
+
+    # Close database pool
+    await engine.dispose()
+    logger.info("✅ Database pool closed")
 
 
 app = FastAPI(
