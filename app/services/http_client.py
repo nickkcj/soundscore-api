@@ -40,8 +40,8 @@ class HTTPClientManager:
                     write=10.0,     # 10s to write request
                     pool=5.0,       # 5s to get connection from pool
                 ),
-                # HTTP/2 for better performance with APIs that support it
-                http2=True,
+                # HTTP/2 disabled - requires h2 package which adds complexity
+                http2=False,
                 # Follow redirects automatically
                 follow_redirects=True,
             )

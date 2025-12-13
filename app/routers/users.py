@@ -1,9 +1,12 @@
 import asyncio
+import logging
 import uuid
 import httpx
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
+
+logger = logging.getLogger(__name__)
 
 from app.models.user import User, UserFollow
 from app.models.review import Review
@@ -91,7 +94,9 @@ async def get_user_profile(
         is_following = follow_result.scalar_one_or_none() is not None
 
     # Resolve profile picture and banner to signed URLs
+    logger.info(f"[Profile] User {user.username} - profile_picture from DB: {user.profile_picture}")
     profile_picture_url = await StorageService.resolve_profile_picture(user.profile_picture)
+    logger.info(f"[Profile] User {user.username} - resolved profile_picture_url: {profile_picture_url}")
     banner_image_url = await StorageService.resolve_banner_image(user.banner_image)
 
     return UserProfileResponse(
@@ -587,15 +592,27 @@ async def upload_profile_picture(
 
         # Store just the path (bucket/filename) - we'll generate signed URLs when serving
         # Use explicit UPDATE for transaction pooler compatibility
+        new_path = f"{bucket}/{filename}"
+        logger.info(f"[Upload] Saving profile_picture path: {new_path} for user {current_user.id}")
+
         from sqlalchemy import update
         await db.execute(
             update(User)
             .where(User.id == current_user.id)
-            .values(profile_picture=f"{bucket}/{filename}")
+            .values(profile_picture=new_path)
         )
         await db.commit()
+        logger.info(f"[Upload] Database commit done")
+
+        # Verify the update worked
+        verify_result = await db.execute(
+            select(User.profile_picture).where(User.id == current_user.id)
+        )
+        saved_path = verify_result.scalar_one_or_none()
+        logger.info(f"[Upload] Verified saved path: {saved_path}")
 
         # Return updated profile
+        logger.info(f"[Upload] Calling get_user_profile for {current_user.username}")
         return await get_user_profile(current_user.username, db, None)
 
     except HTTPException:
