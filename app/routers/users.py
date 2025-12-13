@@ -586,12 +586,17 @@ async def upload_profile_picture(
                 )
 
         # Store just the path (bucket/filename) - we'll generate signed URLs when serving
-        current_user.profile_picture = f"{bucket}/{filename}"
+        # Use explicit UPDATE for transaction pooler compatibility
+        from sqlalchemy import update
+        await db.execute(
+            update(User)
+            .where(User.id == current_user.id)
+            .values(profile_picture=f"{bucket}/{filename}")
+        )
         await db.commit()
-        await db.refresh(current_user)
 
         # Return updated profile
-        return await get_user_profile(current_user.username, db, current_user)
+        return await get_user_profile(current_user.username, db, None)
 
     except HTTPException:
         raise
@@ -695,12 +700,16 @@ async def upload_banner_image(
                     detail=f"Failed to upload: {response.text}"
                 )
 
-        # Store path
-        current_user.banner_image = f"{bucket}/{filename}"
+        # Store path - use explicit UPDATE for transaction pooler compatibility
+        from sqlalchemy import update
+        await db.execute(
+            update(User)
+            .where(User.id == current_user.id)
+            .values(banner_image=f"{bucket}/{filename}")
+        )
         await db.commit()
-        await db.refresh(current_user)
 
-        return await get_user_profile(current_user.username, db, current_user)
+        return await get_user_profile(current_user.username, db, None)
 
     except HTTPException:
         raise
