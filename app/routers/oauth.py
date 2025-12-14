@@ -2,7 +2,7 @@
 
 import secrets
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
@@ -70,6 +70,9 @@ async def find_or_create_user(
     provider_user_id: str,
     email: str | None,
     name: str | None,
+    access_token: str | None = None,
+    refresh_token: str | None = None,
+    expires_in: int | None = None,
 ) -> User:
     """Find existing user or create new one from OAuth data."""
 
@@ -83,7 +86,13 @@ async def find_or_create_user(
     oauth_account = result.scalar_one_or_none()
 
     if oauth_account:
-        # User already has this OAuth linked, get the user
+        # User already has this OAuth linked, update tokens and get the user
+        if access_token:
+            oauth_account.access_token = access_token
+            oauth_account.refresh_token = refresh_token
+            if expires_in:
+                oauth_account.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
         result = await db.execute(
             select(User).where(User.id == oauth_account.user_id)
         )
@@ -101,11 +110,18 @@ async def find_or_create_user(
 
         if existing_user:
             # Link OAuth to existing user
+            token_expires_at = None
+            if expires_in:
+                token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
             oauth_account = OAuthAccount(
                 user_id=existing_user.id,
                 provider=provider,
                 provider_user_id=provider_user_id,
                 provider_email=email,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_expires_at=token_expires_at,
             )
             db.add(oauth_account)
             existing_user.last_login = datetime.now(timezone.utc)
@@ -124,11 +140,18 @@ async def find_or_create_user(
     await db.flush()  # Get the user ID
 
     # Link OAuth account
+    token_expires_at = None
+    if expires_in:
+        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
     oauth_account = OAuthAccount(
         user_id=new_user.id,
         provider=provider,
         provider_user_id=provider_user_id,
         provider_email=email,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_expires_at=token_expires_at,
     )
     db.add(oauth_account)
 
@@ -249,6 +272,9 @@ async def spotify_callback(request: Request, db: AsyncSession = Depends(get_db))
             provider_user_id=provider_user_id,
             email=email,
             name=name,
+            access_token=access_token,
+            refresh_token=token.get('refresh_token'),
+            expires_in=token.get('expires_in'),
         )
 
         if not user.is_active:

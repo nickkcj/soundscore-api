@@ -7,7 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth
+from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth, library
 from app.websockets import group_chat
 from app.services.cache_service import CacheService
 from app.services.http_client import HTTPClientManager
@@ -153,6 +153,13 @@ app.include_router(
     oauth.router,
     prefix=f"{settings.api_v1_prefix}/oauth",
     tags=["OAuth"]
+)
+
+# Library (scrobbling)
+app.include_router(
+    library.router,
+    prefix=f"{settings.api_v1_prefix}/library",
+    tags=["Library"]
 )
 
 

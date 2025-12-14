@@ -22,7 +22,7 @@ if settings.google_oauth_client_id and settings.google_oauth_client_secret:
         }
     )
 
-# Spotify OAuth
+# Spotify OAuth - includes scopes for library/scrobbling features
 if settings.spotify_oauth_client_id and settings.spotify_oauth_client_secret:
     oauth.register(
         name='spotify',
@@ -31,7 +31,7 @@ if settings.spotify_oauth_client_id and settings.spotify_oauth_client_secret:
         authorize_url='https://accounts.spotify.com/authorize',
         access_token_url='https://accounts.spotify.com/api/token',
         client_kwargs={
-            'scope': 'user-read-email user-read-private'
+            'scope': 'user-read-email user-read-private user-read-currently-playing user-read-recently-played user-top-read'
         }
     )
 

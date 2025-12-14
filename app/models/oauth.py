@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint, func, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -23,6 +23,14 @@ class OAuthAccount(Base):
     provider: Mapped[str] = mapped_column(String(20))  # 'google' or 'spotify'
     provider_user_id: Mapped[str] = mapped_column(String(255))
     provider_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # OAuth tokens (needed for Spotify API access)
+    access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now()
