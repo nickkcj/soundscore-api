@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.feed import Notification
     from app.models.group import GroupMember, GroupMessage
     from app.models.chatbot import ChatMessage
+    from app.models.oauth import OAuthAccount
 
 
 class User(Base):
@@ -21,7 +22,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Nullable for OAuth-only users
 
     # Profile
     profile_picture: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -78,6 +79,10 @@ class User(Base):
         cascade="all, delete-orphan"
     )
     chat_messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan"
     )

@@ -3,10 +3,11 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.routers import auth, users, reviews, feed, groups, chatbot, home
+from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth
 from app.websockets import group_chat
 from app.services.cache_service import CacheService
 from app.services.http_client import HTTPClientManager
@@ -84,6 +85,9 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Session Middleware for OAuth state management
+app.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret_key)
+
 # CORS Middleware - configure for your frontend domain in production
 app.add_middleware(
     CORSMiddleware,
@@ -142,6 +146,13 @@ app.include_router(
     home.router,
     prefix=f"{settings.api_v1_prefix}/home",
     tags=["Home"]
+)
+
+# OAuth
+app.include_router(
+    oauth.router,
+    prefix=f"{settings.api_v1_prefix}/oauth",
+    tags=["OAuth"]
 )
 
 

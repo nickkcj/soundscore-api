@@ -29,12 +29,23 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
-    # Spotify API
+    # Spotify API (for music data)
     spotify_client_id: Optional[str] = None
     spotify_client_secret: Optional[str] = None
 
     # Google Gemini API
     google_api_key: Optional[str] = None
+
+    # OAuth - Google
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
+
+    # OAuth - Spotify (can reuse spotify_client_id/secret if same app)
+    spotify_oauth_client_id: Optional[str] = None
+    spotify_oauth_client_secret: Optional[str] = None
+
+    # Backend URL (for OAuth callbacks)
+    backend_url: str = "http://localhost:8000"
 
     # Supabase Storage
     supabase_url: Optional[str] = None

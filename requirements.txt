@@ -18,6 +18,10 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.18
 
+# OAuth
+authlib==1.3.2
+itsdangerous==2.2.0
+
 # HTTP Client (for Spotify API)
 httpx==0.28.1
 

@@ -104,7 +104,16 @@ async def login(
     user = result.scalar_one_or_none()
 
     # Verify credentials
-    if not user or not verify_password(form_data.password, user.password_hash):
+    if not user:
+        raise UnauthorizedException("Incorrect username or password")
+
+    # Check if user has a password (OAuth-only users don't)
+    if user.password_hash is None:
+        raise UnauthorizedException(
+            "This account uses social login. Please sign in with Google or Spotify."
+        )
+
+    if not verify_password(form_data.password, user.password_hash):
         raise UnauthorizedException("Incorrect username or password")
 
     if not user.is_active:
@@ -177,6 +186,12 @@ async def change_password(
     - **current_password**: Your current password
     - **new_password**: New password (min 6 characters)
     """
+    # Check if user has a password
+    if current_user.password_hash is None:
+        raise BadRequestException(
+            "Cannot change password for OAuth-only accounts. Use 'Set Password' instead."
+        )
+
     # Verify current password
     if not verify_password(request.current_password, current_user.password_hash):
         raise BadRequestException("Current password is incorrect")
