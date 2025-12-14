@@ -47,6 +47,14 @@ class TopTrackResponse(BaseModel):
     scrobble_count: int
 
 
+class TopAlbumResponse(BaseModel):
+    """Response for top album."""
+    name: str
+    artist: str
+    image: Optional[str]
+    scrobble_count: int
+
+
 class ScrobblesByDayResponse(BaseModel):
     """Response for scrobbles by day."""
     date: str
@@ -70,6 +78,7 @@ class TopTrackStats(BaseModel):
 class LibraryStatsResponse(BaseModel):
     """Response for library statistics."""
     total_scrobbles: int
+    unique_artists_count: int
     top_artist: Optional[TopArtistStats]
     top_track: Optional[TopTrackStats]
     scrobbles_by_day: list[ScrobblesByDayResponse]

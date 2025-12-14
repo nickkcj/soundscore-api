@@ -21,6 +21,7 @@ class UserUpdate(BaseModel):
     bio: Optional[str] = Field(None, max_length=500)
     profile_picture: Optional[str] = None
     banner_image: Optional[str] = None
+    library_public: Optional[bool] = None
 
 
 class UserResponse(BaseModel):
@@ -43,6 +44,7 @@ class UserProfileResponse(UserResponse):
     following_count: int = 0
     avg_rating: Optional[float] = None
     is_following: Optional[bool] = None  # Only set when viewing another user's profile
+    library_public: bool = True
 
 
 class UserListItem(BaseModel):

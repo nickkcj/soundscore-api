@@ -220,6 +220,13 @@ class SpotifyScrobbleService:
         )
         total_scrobbles = total_result.scalar() or 0
 
+        # Unique artists count
+        unique_artists_result = await self.db.execute(
+            select(func.count(func.distinct(Scrobble.artist_name)))
+            .where(Scrobble.user_id == user_id, Scrobble.played_at >= since)
+        )
+        unique_artists_count = unique_artists_result.scalar() or 0
+
         # Top artist
         top_artist_result = await self.db.execute(
             select(Scrobble.artist_name, func.count(Scrobble.id).label('count'))
@@ -272,6 +279,7 @@ class SpotifyScrobbleService:
 
         return {
             'total_scrobbles': total_scrobbles,
+            'unique_artists_count': unique_artists_count,
             'top_artist': top_artist,
             'top_track': top_track,
             'scrobbles_by_day': scrobbles_by_day,
@@ -376,6 +384,46 @@ class SpotifyScrobbleService:
                 'album': row[2],
                 'image': row[3],
                 'scrobble_count': row[4]
+            }
+            for row in result.all()
+        ]
+
+    async def get_top_albums(self, user_id: int, days: int = 30, limit: int = 10) -> list[dict]:
+        """Get top albums for a user based on scrobble count.
+
+        Albums are identified by the combination of album_name + artist_name.
+        Scrobbles with null/empty album names are skipped.
+        """
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        result = await self.db.execute(
+            select(
+                Scrobble.album_name,
+                Scrobble.artist_name,
+                Scrobble.album_image_url,
+                func.count(Scrobble.id).label('count')
+            )
+            .where(
+                Scrobble.user_id == user_id,
+                Scrobble.played_at >= since,
+                Scrobble.album_name.isnot(None),
+                Scrobble.album_name != '',
+            )
+            .group_by(
+                Scrobble.album_name,
+                Scrobble.artist_name,
+                Scrobble.album_image_url
+            )
+            .order_by(func.count(Scrobble.id).desc())
+            .limit(limit)
+        )
+
+        return [
+            {
+                'name': row[0],
+                'artist': row[1],
+                'image': row[2],
+                'scrobble_count': row[3]
             }
             for row in result.all()
         ]

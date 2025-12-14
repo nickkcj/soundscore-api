@@ -14,6 +14,7 @@ from app.schemas.library import (
     LibraryStatsResponse,
     TopArtistResponse,
     TopTrackResponse,
+    TopAlbumResponse,
     SyncResponse,
     SpotifyConnectionStatus,
 )
@@ -164,6 +165,31 @@ async def get_top_tracks(
     service = SpotifyScrobbleService(db)
     tracks = await service.get_top_tracks(user.id, days=days, limit=limit)
     return tracks
+
+
+# ============= Top Albums =============
+
+@router.get(
+    "/top/albums/{username}",
+    response_model=list[TopAlbumResponse],
+    summary="Get top albums for a user",
+)
+async def get_top_albums(
+    username: str,
+    db: DbSession,
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=10, ge=1, le=50),
+):
+    """
+    Get top albums for a user based on scrobble count.
+
+    Albums are aggregated by album name + artist name combination.
+    Results are ordered by total scrobble count in descending order.
+    """
+    user = await get_user_by_username(db, username)
+    service = SpotifyScrobbleService(db)
+    albums = await service.get_top_albums(user.id, days=days, limit=limit)
+    return albums
 
 
 # ============= Sync (Authenticated) =============
