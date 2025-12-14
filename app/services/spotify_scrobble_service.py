@@ -341,8 +341,21 @@ class SpotifyScrobbleService:
             for item in data.get('items', []):
                 image_url = None
                 if item.get('images') and len(item['images']) > 0:
-                    # Get the medium size image (usually index 1) or first available
-                    image_url = item['images'][1]['url'] if len(item['images']) > 1 else item['images'][0]['url']
+                    # Find the best image for horizontal banner (widest with good quality)
+                    images = item['images']
+                    best_image = images[0]  # Default to largest
+
+                    for img in images:
+                        width = img.get('width') or 0
+                        height = img.get('height') or 0
+                        # Prefer wider images for horizontal banners
+                        # Also ensure minimum quality (at least 300px wide)
+                        if width >= 300:
+                            best_width = best_image.get('width') or 0
+                            if width > best_width:
+                                best_image = img
+
+                    image_url = best_image['url']
 
                 artists.append({
                     'name': item['name'],
