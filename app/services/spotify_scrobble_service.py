@@ -278,7 +278,7 @@ class SpotifyScrobbleService:
         }
 
     async def get_top_artists(self, user_id: int, days: int = 30, limit: int = 10) -> list[dict]:
-        """Get top artists for a user."""
+        """Get top artists for a user from local scrobbles (no images)."""
         since = datetime.now(timezone.utc) - timedelta(days=days)
 
         result = await self.db.execute(
@@ -293,6 +293,58 @@ class SpotifyScrobbleService:
             {'name': row[0], 'scrobble_count': row[1]}
             for row in result.all()
         ]
+
+    async def get_top_artists_from_spotify(
+        self,
+        oauth: OAuthAccount,
+        time_range: str = 'medium_term',
+        limit: int = 10
+    ) -> list[dict]:
+        """Get top artists directly from Spotify API (with images).
+
+        Args:
+            oauth: The user's Spotify OAuth account
+            time_range: 'short_term' (4 weeks), 'medium_term' (6 months), 'long_term' (years)
+            limit: Number of artists to return (max 50)
+        """
+        if not oauth.access_token:
+            return []
+
+        if not await self.refresh_token_if_needed(oauth):
+            if oauth.token_expires_at and oauth.token_expires_at < datetime.now(timezone.utc):
+                return []
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{SPOTIFY_API_BASE}/me/top/artists",
+                headers={'Authorization': f'Bearer {oauth.access_token}'},
+                params={
+                    'time_range': time_range,
+                    'limit': min(limit, 50)
+                }
+            )
+
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            artists = []
+
+            for item in data.get('items', []):
+                image_url = None
+                if item.get('images') and len(item['images']) > 0:
+                    # Get the medium size image (usually index 1) or first available
+                    image_url = item['images'][1]['url'] if len(item['images']) > 1 else item['images'][0]['url']
+
+                artists.append({
+                    'name': item['name'],
+                    'image': image_url,
+                    'spotify_id': item['id'],
+                    'genres': item.get('genres', []),
+                    'popularity': item.get('popularity', 0),
+                })
+
+            return artists
 
     async def get_top_tracks(self, user_id: int, days: int = 30, limit: int = 10) -> list[dict]:
         """Get top tracks for a user."""

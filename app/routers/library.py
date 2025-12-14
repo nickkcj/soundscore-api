@@ -124,13 +124,25 @@ async def get_stats(
 async def get_top_artists(
     username: str,
     db: DbSession,
-    days: int = Query(default=30, ge=1, le=365),
+    time_range: str = Query(default='medium_term', pattern='^(short_term|medium_term|long_term)$'),
     limit: int = Query(default=10, ge=1, le=50),
 ):
-    """Get top artists for a user based on scrobble count."""
+    """
+    Get top artists for a user from Spotify API.
+
+    time_range options:
+    - short_term: approximately last 4 weeks
+    - medium_term: approximately last 6 months
+    - long_term: calculated from several years of data
+    """
     user = await get_user_by_username(db, username)
     service = SpotifyScrobbleService(db)
-    artists = await service.get_top_artists(user.id, days=days, limit=limit)
+    oauth = await service.get_spotify_oauth(user.id)
+
+    if not oauth:
+        return []  # No Spotify connected
+
+    artists = await service.get_top_artists_from_spotify(oauth, time_range=time_range, limit=limit)
     return artists
 
 

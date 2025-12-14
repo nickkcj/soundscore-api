@@ -34,7 +34,8 @@ class ScrobbleResponse(BaseModel):
 class TopArtistResponse(BaseModel):
     """Response for top artist."""
     name: str
-    scrobble_count: int
+    image: Optional[str] = None
+    scrobble_count: Optional[int] = None  # Not available from Spotify API
 
 
 class TopTrackResponse(BaseModel):
