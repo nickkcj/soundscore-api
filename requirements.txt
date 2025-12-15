@@ -25,6 +25,9 @@ itsdangerous==2.2.0
 # HTTP Client (for Spotify API)
 httpx==0.28.1
 
+# Scheduler
+apscheduler==3.10.4
+
 # Redis (for WebSocket & caching)
 redis==5.2.1
 

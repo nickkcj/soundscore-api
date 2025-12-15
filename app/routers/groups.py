@@ -764,6 +764,65 @@ async def leave_group(
     return MessageResponse(message="Left the group")
 
 
+@router.delete(
+    "/{group_uuid}/members/{user_id}",
+    response_model=MessageResponse,
+    summary="Remove a member from group",
+)
+async def remove_member(
+    group_uuid: UUID,
+    user_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """Remove a member from a group. Admin only."""
+    # Get group
+    group_result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = group_result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
+    # Check if current user is admin
+    admin_result = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group.id,
+            GroupMember.user_id == current_user.id,
+            GroupMember.role == "admin"
+        )
+    )
+    is_admin = admin_result.scalar_one_or_none() is not None
+
+    if not is_admin:
+        raise ForbiddenException("Only admins can remove members")
+
+    # Cannot remove the group creator
+    if user_id == group.created_by_id:
+        raise BadRequestException("Cannot remove the group creator")
+
+    # Cannot remove yourself (use leave instead)
+    if user_id == current_user.id:
+        raise BadRequestException("Use leave endpoint to leave the group")
+
+    # Get the member to remove
+    member_result = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group.id,
+            GroupMember.user_id == user_id
+        )
+    )
+    member = member_result.scalar_one_or_none()
+
+    if not member:
+        raise NotFoundException("User is not a member of this group")
+
+    await db.delete(member)
+    await db.commit()
+
+    return MessageResponse(message="Member removed from group")
+
+
 @router.get(
     "/{group_uuid}/members",
     response_model=GroupMemberListResponse,
