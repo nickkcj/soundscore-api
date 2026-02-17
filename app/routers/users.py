@@ -1,9 +1,8 @@
 import asyncio
 import logging
 import uuid
-import httpx
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
@@ -505,7 +504,6 @@ async def upload_profile_picture(
 
     - Accepts JPG, PNG, WebP, and GIF images
     - Maximum file size: 5MB
-    - Image is stored in Supabase Storage
     """
     settings = get_settings()
 
@@ -523,96 +521,29 @@ async def upload_profile_picture(
             f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
         )
 
-    # Check Supabase configuration
-    if not settings.supabase_url:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
-    # Use service role key if available (bypasses RLS), otherwise fall back to anon key
-    storage_key = settings.supabase_service_role_key or settings.supabase_key
-    if not storage_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
     try:
         bucket = "profile_pictures"
 
         # Generate unique filename
         file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
         filename = f"{current_user.id}_{uuid.uuid4()}.{file_ext}"
-
-        # Upload to Supabase Storage via REST API
-        upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
-
-        async with httpx.AsyncClient() as client:
-            # Delete old profile picture if exists
-            if current_user.profile_picture:
-                try:
-                    old_path = current_user.profile_picture
-                    # Handle both new format (bucket/filename) and legacy URLs
-                    if old_path.startswith("http"):
-                        old_filename = old_path.split(f"{bucket}/")[-1] if bucket in old_path else None
-                    elif old_path.startswith(f"{bucket}/"):
-                        old_filename = old_path.split(f"{bucket}/")[-1]
-                    else:
-                        old_filename = None
-
-                    if old_filename:
-                        delete_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{old_filename}"
-                        await client.delete(
-                            delete_url,
-                            headers={
-                                "Authorization": f"Bearer {storage_key}",
-                                "apikey": storage_key,
-                            }
-                        )
-                except Exception:
-                    pass  # Ignore errors when deleting old file
-
-            # Upload new file
-            response = await client.post(
-                upload_url,
-                content=contents,
-                headers={
-                    "Authorization": f"Bearer {storage_key}",
-                    "apikey": storage_key,
-                    "Content-Type": file.content_type,
-                }
-            )
-
-            if response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload: {response.text}"
-                )
-
-        # Store just the path (bucket/filename) - we'll generate signed URLs when serving
-        # Use explicit UPDATE for transaction pooler compatibility
         new_path = f"{bucket}/{filename}"
-        logger.info(f"[Upload] Saving profile_picture path: {new_path} for user {current_user.id}")
 
-        from sqlalchemy import update
+        # Delete old file from S3
+        if current_user.profile_picture and not current_user.profile_picture.startswith("http"):
+            StorageService.delete_file(current_user.profile_picture)
+
+        # Upload to S3
+        StorageService.upload_file(new_path, contents, file.content_type)
+
+        # Save path in DB
         await db.execute(
             update(User)
             .where(User.id == current_user.id)
             .values(profile_picture=new_path)
         )
         await db.commit()
-        logger.info(f"[Upload] Database commit done")
 
-        # Verify the update worked
-        verify_result = await db.execute(
-            select(User.profile_picture).where(User.id == current_user.id)
-        )
-        saved_path = verify_result.scalar_one_or_none()
-        logger.info(f"[Upload] Verified saved path: {saved_path}")
-
-        # Return updated profile
-        logger.info(f"[Upload] Calling get_user_profile for {current_user.username}")
         return await get_user_profile(current_user.username, db, None)
 
     except HTTPException:
@@ -640,7 +571,6 @@ async def upload_banner_image(
     - Accepts JPG, PNG, WebP, and GIF images
     - Maximum file size: 5MB
     - Recommended aspect ratio: 3:1 (e.g., 1500x500)
-    - Image is stored in Supabase Storage
     """
     settings = get_settings()
 
@@ -658,71 +588,26 @@ async def upload_banner_image(
             f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
         )
 
-    # Check Supabase configuration
-    if not settings.supabase_url:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
-    storage_key = settings.supabase_service_role_key or settings.supabase_key
-    if not storage_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
     try:
         bucket = "banner_images"
 
         # Generate unique filename
         file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
         filename = f"{current_user.id}_{uuid.uuid4()}.{file_ext}"
+        new_path = f"{bucket}/{filename}"
 
-        # Upload to Supabase Storage via REST API
-        upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
+        # Delete old file from S3
+        if current_user.banner_image and not current_user.banner_image.startswith("http"):
+            StorageService.delete_file(current_user.banner_image)
 
-        async with httpx.AsyncClient() as client:
-            # Delete old banner if exists
-            if current_user.banner_image:
-                try:
-                    old_path = current_user.banner_image
-                    if old_path.startswith(f"{bucket}/"):
-                        old_filename = old_path.split(f"{bucket}/")[-1]
-                        delete_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{old_filename}"
-                        await client.delete(
-                            delete_url,
-                            headers={
-                                "Authorization": f"Bearer {storage_key}",
-                                "apikey": storage_key,
-                            }
-                        )
-                except Exception:
-                    pass
+        # Upload to S3
+        StorageService.upload_file(new_path, contents, file.content_type)
 
-            # Upload new file
-            response = await client.post(
-                upload_url,
-                content=contents,
-                headers={
-                    "Authorization": f"Bearer {storage_key}",
-                    "apikey": storage_key,
-                    "Content-Type": file.content_type,
-                }
-            )
-
-            if response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload: {response.text}"
-                )
-
-        # Store path - use explicit UPDATE for transaction pooler compatibility
-        from sqlalchemy import update
+        # Save path in DB
         await db.execute(
             update(User)
             .where(User.id == current_user.id)
-            .values(banner_image=f"{bucket}/{filename}")
+            .values(banner_image=new_path)
         )
         await db.commit()
 

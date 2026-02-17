@@ -47,12 +47,11 @@ class Settings(BaseSettings):
     # Backend URL (for OAuth callbacks)
     backend_url: str = "http://localhost:8000"
 
-    # Supabase Storage
-    supabase_url: Optional[str] = None
-    supabase_key: Optional[str] = None
-    supabase_service_role_key: Optional[str] = None  # Bypasses RLS - use for server-side uploads
-    supabase_bucket_profiles: str = "profiles"
-    supabase_bucket_groups: str = "groups"
+    # AWS S3 Storage
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_s3_bucket: str = "soundscore-2"
+    aws_region: str = "us-east-2"
 
     # File uploads
     max_upload_size_mb: int = 5

@@ -1,7 +1,6 @@
 import uuid as uuid_module
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -473,67 +472,23 @@ async def upload_group_cover(
             f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
         )
 
-    # Check Supabase configuration
-    if not settings.supabase_url:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
-    storage_key = settings.supabase_service_role_key or settings.supabase_key
-    if not storage_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
     try:
         bucket = "groups_cover_images"
 
         # Generate unique filename
         file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
         filename = f"{group.id}_{uuid_module.uuid4()}.{file_ext}"
+        new_path = f"{bucket}/{filename}"
 
-        # Upload to Supabase Storage via REST API
-        upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
+        # Delete old file from S3
+        if group.cover_image and not group.cover_image.startswith("http"):
+            StorageService.delete_file(group.cover_image)
 
-        async with httpx.AsyncClient() as client:
-            # Delete old cover image if exists
-            if group.cover_image:
-                try:
-                    old_path = group.cover_image
-                    if old_path.startswith(f"{bucket}/"):
-                        old_filename = old_path.split(f"{bucket}/")[-1]
-                        delete_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{old_filename}"
-                        await client.delete(
-                            delete_url,
-                            headers={
-                                "Authorization": f"Bearer {storage_key}",
-                                "apikey": storage_key,
-                            }
-                        )
-                except Exception:
-                    pass  # Ignore errors when deleting old file
-
-            # Upload new file
-            response = await client.post(
-                upload_url,
-                content=contents,
-                headers={
-                    "Authorization": f"Bearer {storage_key}",
-                    "apikey": storage_key,
-                    "Content-Type": file.content_type,
-                }
-            )
-
-            if response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload: {response.text}"
-                )
+        # Upload to S3
+        StorageService.upload_file(new_path, contents, file.content_type)
 
         # Store the path
-        group.cover_image = f"{bucket}/{filename}"
+        group.cover_image = new_path
         await db.commit()
         await db.refresh(group)
 
@@ -600,49 +555,18 @@ async def upload_message_image(
             f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
         )
 
-    # Check Supabase configuration
-    if not settings.supabase_url:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
-    storage_key = settings.supabase_service_role_key or settings.supabase_key
-    if not storage_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Storage service not configured"
-        )
-
     try:
         bucket = "group_message_images"
 
         # Generate unique filename
         file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
         filename = f"{group.id}/{current_user.id}_{uuid_module.uuid4()}.{file_ext}"
-
-        # Upload to Supabase Storage via REST API
-        upload_url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{filename}"
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                upload_url,
-                content=contents,
-                headers={
-                    "Authorization": f"Bearer {storage_key}",
-                    "apikey": storage_key,
-                    "Content-Type": file.content_type,
-                }
-            )
-
-            if response.status_code not in (200, 201):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload: {response.text}"
-                )
-
-        # Get signed URL for the uploaded image
         image_path = f"{bucket}/{filename}"
+
+        # Upload to S3
+        StorageService.upload_file(image_path, contents, file.content_type)
+
+        # Get presigned URL for the uploaded image
         signed_url = await StorageService.get_signed_url(image_path, expires_in=86400)  # 24 hours
 
         return {"image_url": signed_url, "image_path": image_path}
