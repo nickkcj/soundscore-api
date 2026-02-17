@@ -109,7 +109,7 @@ async def _build_review_response(
 )
 async def search_albums(
     q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=50, description="Number of results"),
+    limit: int = Query(10, ge=1, le=10, description="Number of results (Spotify Dev Mode max: 10)"),
     current_user: CurrentUser = None,  # Require auth
 ):
     """
@@ -141,7 +141,7 @@ class DiscoverResponse(BaseModel):
 async def discover(
     q: str = Query(..., min_length=1, description="Search query"),
     type: str = Query("all", description="Type of search: albums, users, or all"),
-    limit: int = Query(20, ge=1, le=50, description="Number of results per type"),
+    limit: int = Query(10, ge=1, le=10, description="Number of results per type (Spotify Dev Mode max: 10)"),
     db: DbSession = None,
     current_user: CurrentUser = None,
 ):

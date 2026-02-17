@@ -62,7 +62,7 @@ class SpotifyService:
 
 
 
-    async def search_albums(self, query: str, limit: int = 20) -> list[SpotifyAlbumResult]:
+    async def search_albums(self, query: str, limit: int = 10) -> list[SpotifyAlbumResult]:
         """
         Search for albums on Spotify with error handling and caching.
         """
@@ -92,7 +92,7 @@ class SpotifyService:
                 params={
                     "q": query,
                     "type": "album",
-                    "limit": min(limit, 50),
+                    "limit": min(limit, 10),
                 },
                 timeout=10.0 # Evita que a requisição fique pendurada
             )
