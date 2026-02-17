@@ -2,6 +2,7 @@ import logging
 from io import BytesIO
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from app.config import get_settings
@@ -23,6 +24,11 @@ def _get_s3_client():
             region_name=settings.aws_region,
             aws_access_key_id=settings.aws_access_key_id,
             aws_secret_access_key=settings.aws_secret_access_key,
+            endpoint_url=f"https://s3.{settings.aws_region}.amazonaws.com",
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "virtual"},
+            ),
         )
     return _s3_client
 
