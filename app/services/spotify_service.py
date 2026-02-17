@@ -54,61 +54,86 @@ class SpotifyService:
 
         return self._access_token
 
+
+
+
     async def search_albums(self, query: str, limit: int = 20) -> list[SpotifyAlbumResult]:
         """
-        Search for albums on Spotify.
-
-        Args:
-            query: Search query string
-            limit: Maximum number of results (default 20, max 50)
-
-        Returns:
-            List of album search results (cached for 1 hour)
+        Search for albums on Spotify with error handling and caching.
         """
         if not query.strip():
             return []
 
-        # Check cache first (hash query for cache key)
+        # 1. Check cache first
         query_hash = hashlib.md5(f"{query.lower()}:{limit}".encode()).hexdigest()
         cache_key = f"{CacheKeys.SPOTIFY_SEARCH}{query_hash}"
 
-        cached = await CacheService.get_json(cache_key)
-        if cached:
-            return [SpotifyAlbumResult(**item) for item in cached]
+        try:
+            cached = await CacheService.get_json(cache_key)
+            if cached:
+                return [SpotifyAlbumResult(**item) for item in cached]
+        except Exception as e:
+            logger.error(f"Erro ao ler cache: {e}")
 
+        # 2. Get Access Token
         token = await self._get_access_token()
 
+        # 3. Request to Spotify
         client = get_http_client()
-        response = await client.get(
-            f"{self.API_BASE_URL}/search",
-            headers={"Authorization": f"Bearer {token}"},
-            params={
-                "q": query,
-                "type": "album",
-                "limit": min(limit, 50),
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        albums = []
-        for item in data.get("albums", {}).get("items", []):
-            albums.append(
-                SpotifyAlbumResult(
-                    spotify_id=item["id"],
-                    title=item["name"],
-                    artist=", ".join(artist["name"] for artist in item["artists"]),
-                    cover_image=item["images"][0]["url"] if item.get("images") else None,
-                    release_date=item.get("release_date"),
-                )
+        try:
+            response = await client.get(
+                f"{self.API_BASE_URL}/search",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "q": query,
+                    "type": "album",
+                    "limit": min(limit, 50),
+                },
+                timeout=10.0 # Evita que a requisição fique pendurada
             )
+            
+            # Se o Spotify responder algo diferente de 2xx, cai no except abaixo
+            response.raise_for_status()
+            data = response.json()
 
-        # Cache results for 1 hour
-        await CacheService.set_json(
-            cache_key,
-            [a.model_dump() for a in albums],
-            ttl=3600
-        )
+        except HTTPStatusError as e:
+            # AQUI ESTÁ O SEGREDO: Loga o erro real do Spotify sem derrubar o app
+            error_body = e.response.json() if e.response.content else e.response.text
+            logger.error(f"Spotify API Error {e.response.status_code}: {error_body}")
+            return [] # Retorna vazio pro front em vez de dar 502
+        except Exception as e:
+            logger.error(f"Erro inesperado na busca do Spotify: {e}")
+            return []
+
+        # 4. Parse Results
+        albums = []
+        items = data.get("albums", {}).get("items", [])
+        
+        for item in items:
+            try:
+                albums.append(
+                    SpotifyAlbumResult(
+                        spotify_id=item["id"],
+                        title=item["name"],
+                        artist=", ".join(artist["name"] for artist in item["artists"]),
+                        cover_image=item["images"][0]["url"] if item.get("images") else None,
+                        release_date=item.get("release_date"),
+                    )
+                )
+            except (KeyError, IndexError) as e:
+                logger.warning(f"Erro ao parsear álbum do Spotify: {e}")
+                continue
+
+        # 5. Cache results for 1 hour
+        if albums:
+            try:
+                await CacheService.set_json(
+                    cache_key,
+                    [a.model_dump() for a in albums],
+                    ttl=3600
+                )
+            except Exception as e:
+                logger.error(f"Erro ao salvar no cache: {e}")
 
         return albums
 
