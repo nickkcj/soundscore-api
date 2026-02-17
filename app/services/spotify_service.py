@@ -1,12 +1,17 @@
 import base64
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+from httpx import HTTPStatusError
 
 from app.config import get_settings
 from app.schemas.review import SpotifyAlbumResult
 from app.services.cache_service import CacheService, CacheKeys
 from app.services.http_client import get_http_client
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
