@@ -11,11 +11,7 @@ from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth
 from app.websockets import group_chat
 from app.services.cache_service import CacheService
 from app.services.http_client import HTTPClientManager
-from app.services.scrobble_scheduler import setup_scheduler
 from app.database import engine
-
-# Global scheduler reference for cleanup
-_scheduler = None
 
 settings = get_settings()
 
@@ -60,25 +56,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ HTTP client warmup failed: {e}")
 
-    # 4. Start scrobble scheduler
-    global _scheduler
-    try:
-        _scheduler = setup_scheduler(app)
-        logger.info("✅ Scrobble scheduler started")
-    except Exception as e:
-        logger.warning(f"⚠️ Scrobble scheduler failed to start: {e}")
-
     logger.info("🎵 SoundScore API ready to serve requests!")
 
     yield
 
     # Shutdown - cleanup connections
     logger.info(f"👋 Shutting down {settings.app_name}...")
-
-    # Stop scheduler
-    if _scheduler:
-        _scheduler.shutdown(wait=False)
-        logger.info("✅ Scrobble scheduler stopped")
 
     # Close HTTP client
     await HTTPClientManager.close()
