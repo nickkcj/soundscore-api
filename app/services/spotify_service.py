@@ -17,7 +17,7 @@ settings = get_settings()
 
 
 class SpotifyService:
-    """Service for interacting with Spotify API using global HTTP client."""
+    """Service for interacting with Spotify's API using global HTTP client."""
 
     TOKEN_URL = "https://accounts.spotify.com/api/token"
     API_BASE_URL = "https://api.spotify.com/v1"
