@@ -336,6 +336,7 @@ async def get_album_details(
         spotify_id=spotify_data["spotify_id"],
         title=spotify_data["title"],
         artist=spotify_data["artist"],
+        artist_spotify_id=spotify_data.get("artist_spotify_id"),
         cover_image=spotify_data.get("cover_image"),
         release_date=spotify_data.get("release_date"),
         label=spotify_data.get("label"),

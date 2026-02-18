@@ -278,5 +278,51 @@ Write the summary now:"""
             return None
 
 
+    def generate_artist_bio(
+        self,
+        name: str,
+        genres: list[str],
+        popularity: int = 0,
+    ) -> str | None:
+        """
+        Generate a biography/summary for an artist using Gemini AI.
+
+        Args:
+            name: Artist name
+            genres: List of genres
+            popularity: Spotify popularity score (0-100)
+
+        Returns:
+            Generated bio text or None if generation fails
+        """
+        self._ensure_configured()
+
+        genres_text = ", ".join(genres) if genres else "Unknown genres"
+
+        prompt = f"""Write a brief, engaging biography (2-3 paragraphs) about this music artist.
+Focus on their musical style, career trajectory, and what makes them notable.
+Write in a neutral, informative tone suitable for a music review platform.
+Do NOT invent specific facts about chart positions, sales numbers, or awards unless you're absolutely certain they are accurate.
+If you're not sure about specific details, keep it general about their style and influence.
+Write in Portuguese (Brazil).
+
+Artist: {name}
+Genres: {genres_text}
+Popularity Score: {popularity}/100
+
+Write the biography now:"""
+
+        try:
+            response = self._model.generate_content(prompt)
+
+            if not hasattr(response, 'text') or not response.text:
+                return None
+
+            return response.text.strip()
+
+        except Exception:
+            return None
+
+
 # Singleton instance
 gemini_service = GeminiService()

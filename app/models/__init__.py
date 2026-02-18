@@ -4,6 +4,8 @@ from app.models.review import Album, Review, Comment, ReviewLike
 from app.models.feed import Notification
 from app.models.group import Group, GroupMember, GroupMessage, GroupInvite
 from app.models.chatbot import ChatMessage
+from app.models.artist import Artist
+from app.models.direct_message import Conversation, DirectMessage
 
 __all__ = [
     "User",
@@ -18,4 +20,7 @@ __all__ = [
     "GroupMessage",
     "GroupInvite",
     "ChatMessage",
+    "Artist",
+    "Conversation",
+    "DirectMessage",
 ]

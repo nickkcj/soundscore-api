@@ -16,6 +16,7 @@ class EmailService:
     @staticmethod
     def _get_password_reset_email_html(reset_url: str) -> str:
         """Generate styled HTML email template for password reset."""
+        logo_url = f"{settings.frontend_url}/images/logo_soundscore.png"
         return f"""
 <!DOCTYPE html>
 <html>
@@ -33,12 +34,11 @@ class EmailService:
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f3f4f6;">
         <tr>
             <td style="padding: 40px 20px;">
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
-                    <!-- Header rosa com logo -->
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+                    <!-- Header vinho com logo -->
                     <tr>
-                        <td style="background-color: #C9184A; padding: 32px 40px; text-align: center;">
-                            <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: bold; letter-spacing: 1px;">SOUNDSCORE</h1>
-                            <p style="margin: 8px 0 0 0; color: #fecdd3; font-size: 13px;">Rank your taste in music</p>
+                        <td style="background-color: #722F37; padding: 32px 40px; text-align: center;">
+                            <img src="{logo_url}" alt="SoundScore" width="180" style="display: block; margin: 0 auto; max-width: 180px; height: auto;" />
                         </td>
                     </tr>
 
@@ -50,18 +50,18 @@ class EmailService:
                                 Recebemos uma solicitação para redefinir sua senha. Clique no botão abaixo para criar uma nova senha. Este link expira em <strong>15 minutos</strong>.
                             </p>
 
-                            <!-- Button rosa -->
+                            <!-- Button vinho -->
                             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                                 <tr>
                                     <td align="center" style="padding: 8px 0 24px 0;">
                                         <!--[if mso]>
-                                        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{reset_url}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="10%" strokecolor="#C9184A" fillcolor="#C9184A">
+                                        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{reset_url}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="10%" strokecolor="#722F37" fillcolor="#722F37">
                                         <w:anchorlock/>
-                                        <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Clique Aqui</center>
+                                        <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Redefinir Senha</center>
                                         </v:roundrect>
                                         <![endif]-->
                                         <!--[if !mso]><!-->
-                                        <a href="{reset_url}" style="display: inline-block; padding: 14px 40px; background-color: #C9184A; color: #ffffff; text-decoration: none; font-weight: bold; font-size: 16px; border-radius: 6px;">Clique Aqui</a>
+                                        <a href="{reset_url}" style="display: inline-block; padding: 14px 40px; background-color: #722F37; color: #ffffff; text-decoration: none; font-weight: bold; font-size: 16px; border-radius: 6px;">Redefinir Senha</a>
                                         <!--<![endif]-->
                                     </td>
                                 </tr>
@@ -76,14 +76,14 @@ class EmailService:
                     <!-- Link alternativo -->
                     <tr>
                         <td style="padding: 0 40px 32px 40px;">
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f9fafb; border-radius: 6px;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #fbe6ea; border-radius: 6px;">
                                 <tr>
                                     <td style="padding: 16px;">
-                                        <p style="margin: 0; color: #6b7280; font-size: 12px;">
+                                        <p style="margin: 0; color: #5e2530; font-size: 12px;">
                                             Se o botão não funcionar, copie e cole este link no seu navegador:
                                         </p>
                                         <p style="margin: 8px 0 0 0;">
-                                            <a href="{reset_url}" style="color: #C9184A; font-size: 12px; word-break: break-all;">{reset_url}</a>
+                                            <a href="{reset_url}" style="color: #722F37; font-size: 12px; word-break: break-all;">{reset_url}</a>
                                         </p>
                                     </td>
                                 </tr>

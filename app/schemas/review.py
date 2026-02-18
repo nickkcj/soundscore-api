@@ -162,6 +162,7 @@ class AlbumDetailResponse(BaseModel):
     spotify_id: str
     title: str
     artist: str
+    artist_spotify_id: Optional[str] = None
     cover_image: Optional[str] = None
     release_date: Optional[str] = None
     label: Optional[str] = None

@@ -247,10 +247,11 @@ class SpotifyScrobbleService:
                 Scrobble.track_name,
                 Scrobble.artist_name,
                 Scrobble.album_image_url,
-                func.count(Scrobble.id).label('count')
+                func.count(Scrobble.id).label('count'),
+                Scrobble.track_id,
             )
             .where(Scrobble.user_id == user_id, Scrobble.played_at >= since)
-            .group_by(Scrobble.track_name, Scrobble.artist_name, Scrobble.album_image_url)
+            .group_by(Scrobble.track_name, Scrobble.artist_name, Scrobble.album_image_url, Scrobble.track_id)
             .order_by(func.count(Scrobble.id).desc())
             .limit(1)
         )
@@ -259,7 +260,8 @@ class SpotifyScrobbleService:
             'name': top_track_row[0],
             'artist': top_track_row[1],
             'image': top_track_row[2],
-            'count': top_track_row[3]
+            'count': top_track_row[3],
+            'track_id': top_track_row[4],
         } if top_track_row else None
 
         # Scrobbles by day

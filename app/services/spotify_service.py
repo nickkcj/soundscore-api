@@ -242,10 +242,12 @@ class SpotifyService:
         album_data = response.json()
 
         # Extract album info
+        artists_list = album_data.get("artists", [])
         album_details = {
             "spotify_id": album_data["id"],
             "title": album_data["name"],
-            "artist": ", ".join(artist["name"] for artist in album_data["artists"]),
+            "artist": ", ".join(artist["name"] for artist in artists_list),
+            "artist_spotify_id": artists_list[0]["id"] if artists_list else None,
             "cover_image": album_data["images"][0]["url"] if album_data.get("images") else None,
             "release_date": album_data.get("release_date"),
             "label": album_data.get("label"),
@@ -274,6 +276,91 @@ class SpotifyService:
         await CacheService.set_json(cache_key, album_details, ttl=86400)
 
         return album_details
+
+
+    async def get_artist(self, spotify_id: str) -> Optional[dict]:
+        """Get artist details by Spotify ID (cached for 24h)."""
+        cache_key = f"spotify:artist:{spotify_id}"
+        cached = await CacheService.get_json(cache_key)
+        if cached:
+            return cached
+
+        token = await self._get_access_token()
+        client = get_http_client()
+
+        try:
+            response = await client.get(
+                f"{self.API_BASE_URL}/artists/{spotify_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0,
+            )
+
+            if response.status_code == 404:
+                return None
+
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Spotify artist fetch error: {e}")
+            return None
+
+        image_url = data["images"][0]["url"] if data.get("images") else None
+
+        artist_details = {
+            "spotify_id": data["id"],
+            "name": data["name"],
+            "image_url": image_url,
+            "genres": data.get("genres", []),
+            "popularity": data.get("popularity", 0),
+            "followers": data.get("followers", {}).get("total", 0),
+            "spotify_url": data.get("external_urls", {}).get("spotify", ""),
+        }
+
+        await CacheService.set_json(cache_key, artist_details, ttl=86400)
+        return artist_details
+
+    async def get_artist_albums(self, spotify_id: str, limit: int = 50) -> list[dict]:
+        """Get artist's albums from Spotify (cached for 24h)."""
+        cache_key = f"spotify:artist_albums:{spotify_id}"
+        cached = await CacheService.get_json(cache_key)
+        if cached:
+            return cached
+
+        token = await self._get_access_token()
+        client = get_http_client()
+
+        try:
+            response = await client.get(
+                f"{self.API_BASE_URL}/artists/{spotify_id}/albums",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "include_groups": "album",
+                    "limit": min(limit, 50),
+                },
+                timeout=10.0,
+            )
+
+            if response.status_code == 404:
+                return []
+
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Spotify artist albums fetch error: {e}")
+            return []
+
+        albums = []
+        for item in data.get("items", []):
+            albums.append({
+                "spotify_id": item["id"],
+                "title": item["name"],
+                "cover_image": item["images"][0]["url"] if item.get("images") else None,
+                "release_date": item.get("release_date"),
+                "artist": ", ".join(a["name"] for a in item.get("artists", [])),
+            })
+
+        await CacheService.set_json(cache_key, albums, ttl=86400)
+        return albums
 
 
 # Singleton instance

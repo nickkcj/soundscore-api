@@ -107,12 +107,32 @@ def refresh_token_if_needed(conn, oauth):
     return True
 
 
-def get_recently_played(access_token, limit=50):
+def get_last_scrobble_time(conn, user_id):
+    """Get the most recent played_at timestamp for a user (as Unix ms)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT played_at FROM scrobbles WHERE user_id = %s ORDER BY played_at DESC LIMIT 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if row and row["played_at"]:
+            ts = row["played_at"]
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return int(ts.timestamp() * 1000)
+    return None
+
+
+def get_recently_played(access_token, limit=50, after=None):
     """Fetch recently played tracks from Spotify API."""
+    params = {"limit": min(limit, 50)}
+    if after:
+        params["after"] = after
+
     resp = requests.get(
         f"{SPOTIFY_API_BASE}/me/player/recently-played",
         headers={"Authorization": f"Bearer {access_token}"},
-        params={"limit": min(limit, 50)},
+        params=params,
     )
 
     if resp.status_code != 200:
@@ -184,7 +204,8 @@ def handler(event, context):
                     errors += 1
                     continue
 
-                tracks = get_recently_played(oauth["access_token"])
+                after = get_last_scrobble_time(conn, oauth["user_id"])
+                tracks = get_recently_played(oauth["access_token"], after=after)
                 if not tracks:
                     continue
 

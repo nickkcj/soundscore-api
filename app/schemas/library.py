@@ -73,6 +73,7 @@ class TopTrackStats(BaseModel):
     artist: str
     image: Optional[str]
     count: int
+    track_id: Optional[str] = None
 
 
 class LibraryStatsResponse(BaseModel):

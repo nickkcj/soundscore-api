@@ -7,8 +7,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth, library
-from app.websockets import group_chat
+from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth, library, artist, dm
+from app.websockets import group_chat, dm_chat
 from app.services.cache_service import CacheService
 from app.services.http_client import HTTPClientManager
 from app.database import engine
@@ -133,6 +133,10 @@ app.include_router(
     group_chat.router,
     tags=["WebSocket"]
 )
+app.include_router(
+    dm_chat.router,
+    tags=["WebSocket"]
+)
 
 # Chatbot
 app.include_router(
@@ -160,6 +164,20 @@ app.include_router(
     library.router,
     prefix=f"{settings.api_v1_prefix}/library",
     tags=["Library"]
+)
+
+# Artist
+app.include_router(
+    artist.router,
+    prefix=f"{settings.api_v1_prefix}/artist",
+    tags=["Artist"]
+)
+
+# Direct Messages
+app.include_router(
+    dm.router,
+    prefix=f"{settings.api_v1_prefix}/dm",
+    tags=["Direct Messages"]
 )
 
 

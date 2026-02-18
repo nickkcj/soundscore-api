@@ -17,6 +17,9 @@ from app.models import (
     Notification,
     Group, GroupMember, GroupMessage,
     ChatMessage,
+    Artist,
+    Conversation,
+    DirectMessage,
 )
 
 # Alembic Config object
