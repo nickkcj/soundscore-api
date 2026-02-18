@@ -1,5 +1,6 @@
 """Direct message router for 1:1 conversations."""
 
+import json
 import uuid as uuid_module
 
 from fastapi import APIRouter, Query, HTTPException, UploadFile, File
@@ -462,18 +463,34 @@ async def share_review(
     if not body.recipient_username and not body.group_uuid:
         raise BadRequestException("Must specify recipient_username or group_uuid")
 
-    # Verify review exists
+    # Verify review exists and load album + user data
     from uuid import UUID
+    from app.models.review import Album
     review_result = await db.execute(
-        select(Review).where(Review.uuid == UUID(review_uuid))
+        select(Review)
+        .options(selectinload(Review.album), selectinload(Review.user))
+        .where(Review.uuid == UUID(review_uuid))
     )
     review = review_result.scalar_one_or_none()
     if not review:
         raise NotFoundException("Review not found")
 
-    settings = get_settings()
-    review_url = f"{settings.frontend_url}/reviews/{review_uuid}"
-    share_content = f"🎵 {review_url}"
+    # Resolve album cover image
+    album_cover = review.album.cover_image
+
+    # Build rich share content as JSON
+    share_content = json.dumps({
+        "type": "review_share",
+        "review_uuid": review_uuid,
+        "album_title": review.album.title,
+        "album_artist": review.album.artist,
+        "album_cover": album_cover,
+        "album_spotify_id": review.album.spotify_id,
+        "rating": review.rating,
+        "text": (review.text[:150] + "...") if review.text and len(review.text) > 150 else review.text,
+        "username": review.user.username,
+        "is_favorite": review.is_favorite,
+    })
 
     if body.recipient_username:
         # Share via DM
