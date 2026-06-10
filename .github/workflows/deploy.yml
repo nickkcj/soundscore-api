@@ -3,20 +3,43 @@ name: Deploy SoundScore
 on:
   push:
     branches:
-      - master 
+      - master
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Executando comandos via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd ~/soundscore-api
-            git pull origin master
-            docker-compose up -d --build
-            docker image prune -f
+          node-version: 22
+
+      # A Lambda é arm64; o runner é x86_64. O QEMU permite rodar o
+      # container de build arm64 (serverless-python-requirements/dockerizePip)
+      - name: Setup QEMU (build arm64)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install Serverless deps
+        run: npm ci
+
+      # O serverless.yml lê as variáveis via useDotenv e as injeta na Lambda
+      - name: Write .env
+        run: printf '%s' "$ENV_FILE" > .env
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+
+      - name: Deploy
+        run: npx serverless deploy --stage prod
+        env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-2
+
+      - name: Smoke test
+        run: |
+          sleep 5
+          curl -sf https://api.soundscore.com.br/health

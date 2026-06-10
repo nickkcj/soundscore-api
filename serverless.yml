@@ -1,0 +1,85 @@
+service: soundscore-api
+
+# Reads variables from .env so secrets never live in this file
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: python3.12
+  # arm64 (Graviton): mesma cota Always Free, mais barato por GB-s,
+  # e casa com o build Docker nativo em Macs Apple Silicon
+  architecture: arm64
+  region: us-east-2
+  stage: ${opt:stage, 'prod'}
+  memorySize: 512
+  timeout: 29 # API Gateway hard limit is ~30s
+  logRetentionInDays: 7
+
+  # Env vars injected into the Lambda.
+  # NOTE: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION are
+  # reserved by Lambda and must NOT be set here — boto3 uses the
+  # function's IAM role (below) automatically.
+  environment:
+    APP_NAME: ${env:APP_NAME, 'SoundScore API'}
+    DEBUG: ${env:DEBUG, 'False'}
+    DATABASE_URL: ${env:DATABASE_URL}
+    JWT_SECRET_KEY: ${env:JWT_SECRET_KEY}
+    JWT_ALGORITHM: ${env:JWT_ALGORITHM, 'HS256'}
+    ACCESS_TOKEN_EXPIRE_MINUTES: ${env:ACCESS_TOKEN_EXPIRE_MINUTES, '30'}
+    REFRESH_TOKEN_EXPIRE_DAYS: ${env:REFRESH_TOKEN_EXPIRE_DAYS, '7'}
+    REDIS_URL: ${env:REDIS_URL, 'redis://127.0.0.1:6379'}
+    SPOTIFY_CLIENT_ID: ${env:SPOTIFY_CLIENT_ID, ''}
+    SPOTIFY_CLIENT_SECRET: ${env:SPOTIFY_CLIENT_SECRET, ''}
+    GOOGLE_API_KEY: ${env:GOOGLE_API_KEY, ''}
+    GOOGLE_OAUTH_CLIENT_ID: ${env:GOOGLE_OAUTH_CLIENT_ID, ''}
+    GOOGLE_OAUTH_CLIENT_SECRET: ${env:GOOGLE_OAUTH_CLIENT_SECRET, ''}
+    SPOTIFY_OAUTH_CLIENT_ID: ${env:SPOTIFY_OAUTH_CLIENT_ID, ''}
+    SPOTIFY_OAUTH_CLIENT_SECRET: ${env:SPOTIFY_OAUTH_CLIENT_SECRET, ''}
+    BACKEND_URL: ${env:BACKEND_URL, 'http://localhost:8000'}
+    FRONTEND_URL: ${env:FRONTEND_URL, 'http://localhost:3000'}
+    AWS_S3_BUCKET: ${env:AWS_S3_BUCKET, 'soundscore-2'}
+    MAX_UPLOAD_SIZE_MB: ${env:MAX_UPLOAD_SIZE_MB, '5'}
+    RESEND_API_KEY: ${env:RESEND_API_KEY, ''}
+
+  # S3 access via execution role (replaces the old access keys)
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+          Resource: arn:aws:s3:::${env:AWS_S3_BUCKET, 'soundscore-2'}/*
+
+functions:
+  api:
+    handler: app.lambda_handler.handler
+    description: SoundScore FastAPI monolith (all routes via proxy)
+    events:
+      # HTTP API catch-all: every method/path goes to this Lambda,
+      # FastAPI does the routing internally
+      - httpApi: '*'
+
+package:
+  patterns:
+    - '!**'
+    - 'app/**'
+    - '!app/**/__pycache__/**'
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    fileName: requirements-lambda.txt
+    # Build wheels inside a Lambda-like Docker image so native libs
+    # (asyncpg, pydantic-core, pillow, grpcio...) match the runtime
+    dockerizePip: true
+    slim: true
+    # Override dos padrões default do slim: eles apagam os *.dist-info,
+    # mas o pydantic precisa dos metadados do email-validator em runtime
+    slimPatternsAppendDefaults: false
+    slimPatterns:
+      - '**/*.py[cod]'
+      - '**/__pycache__*'

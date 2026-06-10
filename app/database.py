@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -18,6 +20,11 @@ engine = create_async_engine(
     connect_args={
         "statement_cache_size": 0,           # Required for pgbouncer (Supabase)
         "prepared_statement_cache_size": 0,  # Also required for pgbouncer
+        # pgbouncer in transaction mode multiplexes clients onto shared server
+        # connections, so asyncpg's fixed statement names collide
+        # (DuplicatePreparedStatementError). Unique names per statement avoid it.
+        # https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#prepared-statement-name-with-pgbouncer
+        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
         "command_timeout": 30,               # Query timeout
     },
 )

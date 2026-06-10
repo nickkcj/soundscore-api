@@ -19,11 +19,13 @@ def _get_s3_client():
     """Lazy-init a reusable boto3 S3 client."""
     global _s3_client
     if _s3_client is None:
+        # Credentials come from boto3's default chain (env vars, IAM role).
+        # Never pass keys explicitly: on Lambda the runtime injects temporary
+        # AWS_ACCESS_KEY_ID/SECRET, and signing with them WITHOUT the matching
+        # AWS_SESSION_TOKEN produces invalid presigned URLs (InvalidAccessKeyId).
         _s3_client = boto3.client(
             "s3",
             region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
             endpoint_url=f"https://s3.{settings.aws_region}.amazonaws.com",
             config=Config(
                 signature_version="s3v4",

@@ -36,3 +36,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Serverless Framework
+.serverless/
+node_modules/
+
+# Supabase CLI
+supabase/.temp/
