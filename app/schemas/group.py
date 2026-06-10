@@ -75,8 +75,9 @@ class GroupMemberListResponse(BaseModel):
 # ============== Group Message Schemas ==============
 
 class GroupMessageCreate(BaseModel):
-    """Schema for creating a group message."""
-    content: str = Field(..., min_length=1, max_length=5000)
+    """Schema for creating a group message (text and/or image)."""
+    content: str = Field("", max_length=5000)
+    image_url: Optional[str] = Field(None, max_length=500)
 
 
 class GroupMessageResponse(BaseModel):

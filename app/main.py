@@ -7,7 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth, library, artist, dm
+from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth, library, artist, dm, realtime
 from app.websockets import group_chat, dm_chat
 from app.services.cache_service import CacheService
 from app.services.http_client import HTTPClientManager
@@ -178,6 +178,13 @@ app.include_router(
     dm.router,
     prefix=f"{settings.api_v1_prefix}/dm",
     tags=["Direct Messages"]
+)
+
+# Supabase Realtime (token para o frontend assinar canais de chat)
+app.include_router(
+    realtime.router,
+    prefix=f"{settings.api_v1_prefix}/realtime",
+    tags=["Realtime"]
 )
 
 

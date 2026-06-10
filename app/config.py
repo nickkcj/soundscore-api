@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
+    # Supabase Realtime (chat delivery)
+    supabase_url: Optional[str] = None
+    supabase_anon_key: Optional[str] = None
+    supabase_jwt_secret: Optional[str] = None
+
     # Spotify API (for music data)
     spotify_client_id: Optional[str] = None
     spotify_client_secret: Optional[str] = None

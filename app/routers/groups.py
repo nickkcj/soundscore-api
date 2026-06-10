@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.models.group import Group, GroupMember, GroupMessage, GroupInvite
 from app.schemas.group import (
     GroupCreate,
+    GroupMessageCreate,
     GroupUpdate,
     GroupResponse,
     GroupListResponse,
@@ -890,6 +891,73 @@ async def get_group_messages(
         page=page,
         per_page=per_page,
         has_next=offset + per_page < total,
+    )
+
+
+@router.post(
+    "/{group_uuid}/messages",
+    response_model=GroupMessageResponse,
+    status_code=201,
+    summary="Send group message",
+)
+async def send_group_message(
+    group_uuid: UUID,
+    message_data: GroupMessageCreate,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """
+    Send a message to a group. Must be a member.
+
+    Replaces the WebSocket send path (unsupported on API Gateway HTTP).
+    Delivery to other members happens via Supabase Realtime, which
+    broadcasts the INSERT on group_messages to subscribed clients.
+    """
+    content = message_data.content.strip()
+    if not content and not message_data.image_url:
+        raise BadRequestException("Message must have content or an image")
+
+    # Get group
+    group_result = await db.execute(
+        select(Group).where(Group.uuid == group_uuid)
+    )
+    group = group_result.scalar_one_or_none()
+    if not group:
+        raise NotFoundException("Group not found")
+
+    # Verify membership
+    member_result = await db.execute(
+        select(GroupMember).where(
+            GroupMember.group_id == group.id,
+            GroupMember.user_id == current_user.id
+        )
+    )
+    if not member_result.scalar_one_or_none():
+        raise ForbiddenException("Not a member of this group")
+
+    message = GroupMessage(
+        group_id=group.id,
+        user_id=current_user.id,
+        content=content,
+        image_url=message_data.image_url,
+    )
+    db.add(message)
+    await db.flush()
+    await db.refresh(message)
+
+    profile_url = await StorageService.resolve_profile_picture(current_user.profile_picture)
+    resolved_image_url = None
+    if message.image_url:
+        resolved_image_url = await StorageService.get_signed_url(message.image_url, expires_in=3600)
+
+    return GroupMessageResponse(
+        id=message.id,
+        content=message.content,
+        image_url=resolved_image_url,
+        created_at=message.created_at,
+        user_id=current_user.id,
+        username=current_user.username,
+        profile_picture=profile_url,
     )
 
 
