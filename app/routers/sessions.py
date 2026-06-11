@@ -122,6 +122,10 @@ class SessionListItem(BaseModel):
     album_cover_image: Optional[str]
     participants_count: int
     created_at: datetime
+    # Notas no histórico: média do grupo e a média do próprio usuário,
+    # para revisitar "qual nota demos no álbum anterior" sem abrir a sessão
+    album_avg: Optional[float] = None
+    my_avg: Optional[float] = None
 
 
 # ============== Helpers ==============
@@ -300,15 +304,35 @@ async def create_session(data: SessionCreate, current_user: CurrentUser, db: DbS
 
 @router.get("/mine", response_model=list[SessionListItem], summary="My sessions")
 async def my_sessions(current_user: CurrentUser, db: DbSession):
+    participants_sq = (
+        select(func.count(SessionParticipant.id))
+        .where(SessionParticipant.session_id == ListeningSession.id)
+        .correlate(ListeningSession)
+        .scalar_subquery()
+    )
+    album_avg_sq = (
+        select(func.avg(SessionTrackRating.rating))
+        .where(SessionTrackRating.session_id == ListeningSession.id)
+        .correlate(ListeningSession)
+        .scalar_subquery()
+    )
+    my_avg_sq = (
+        select(func.avg(SessionTrackRating.rating))
+        .where(
+            SessionTrackRating.session_id == ListeningSession.id,
+            SessionTrackRating.user_id == current_user.id,
+        )
+        .correlate(ListeningSession)
+        .scalar_subquery()
+    )
+
     result = await db.execute(
-        select(ListeningSession, func.count(SessionParticipant.id))
-        .join(SessionParticipant, SessionParticipant.session_id == ListeningSession.id)
+        select(ListeningSession, participants_sq, album_avg_sq, my_avg_sq)
         .where(ListeningSession.id.in_(
             select(SessionParticipant.session_id).where(
                 SessionParticipant.user_id == current_user.id
             )
         ))
-        .group_by(ListeningSession.id)
         .order_by(ListeningSession.created_at.desc())
         .limit(30)
     )
@@ -319,10 +343,14 @@ async def my_sessions(current_user: CurrentUser, db: DbSession):
             album_title=s.album_title,
             album_artist=s.album_artist,
             album_cover_image=s.album_cover_image,
-            participants_count=count,
+            participants_count=count or 0,
             created_at=s.created_at,
+            # Só expõe médias de sessão finalizada (em andamento seria spoiler
+            # de notas ainda não reveladas)
+            album_avg=round(float(album_avg), 1) if s.status == "finished" and album_avg is not None else None,
+            my_avg=round(float(my_avg), 1) if s.status == "finished" and my_avg is not None else None,
         )
-        for s, count in result.all()
+        for s, count, album_avg, my_avg in result.all()
     ]
 
 
