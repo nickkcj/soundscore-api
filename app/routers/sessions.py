@@ -12,11 +12,12 @@ Regras centrais:
 """
 import secrets
 import string
+import uuid as uuid_module
 from datetime import datetime, timezone
 from statistics import pstdev
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -32,6 +33,7 @@ from app.core.exceptions import (
     BadRequestException,
     ConflictException,
 )
+from app.config import get_settings
 from app.dependencies import CurrentUser, DbSession
 from app.services.storage_service import StorageService
 
@@ -208,12 +210,15 @@ async def _build_state(db, session: ListeningSession, user_id: int) -> SessionSt
     if session.status == "finished":
         summary = _build_summary(session, by_track)
 
+    # Capa: URL http (Spotify/externa) passa direto; chave S3 vira URL assinada
+    cover = await StorageService.resolve_profile_picture(session.album_cover_image)
+
     return SessionState(
         code=session.code,
         status=session.status,
         album_title=session.album_title,
         album_artist=session.album_artist,
-        album_cover_image=session.album_cover_image,
+        album_cover_image=cover,
         album_spotify_id=session.album_spotify_id,
         host_id=session.host_id,
         is_host=user_id == session.host_id,
@@ -302,6 +307,42 @@ async def create_session(data: SessionCreate, current_user: CurrentUser, db: DbS
     return await _build_state(db, session, current_user.id)
 
 
+@router.post("/upload-cover", summary="Upload album cover for a session")
+async def upload_session_cover(
+    current_user: CurrentUser,
+    file: UploadFile = File(...),
+):
+    """
+    Upload direto da capa (modo manual, álbum fora da API do Spotify).
+    Retorna a chave S3 (vai no album_cover_image da criação) e uma URL
+    assinada para preview imediato no modal.
+    """
+    settings = get_settings()
+
+    allowed_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise BadRequestException(
+            f"Invalid file type. Allowed: {', '.join(allowed_types)}"
+        )
+
+    contents = await file.read()
+    if len(contents) > settings.max_upload_size_bytes:
+        raise BadRequestException(
+            f"File too large. Maximum size: {settings.max_upload_size_mb}MB"
+        )
+
+    try:
+        file_ext = file.filename.split(".")[-1].lower() if file.filename else "jpg"
+        image_path = f"session_covers/{current_user.id}_{uuid_module.uuid4()}.{file_ext}"
+        StorageService.upload_file(image_path, contents, file.content_type)
+        preview_url = await StorageService.get_signed_url(image_path, expires_in=3600)
+        return {"image_path": image_path, "image_url": preview_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload cover: {e}")
+
+
 @router.get("/mine", response_model=list[SessionListItem], summary="My sessions")
 async def my_sessions(current_user: CurrentUser, db: DbSession):
     participants_sq = (
@@ -342,7 +383,7 @@ async def my_sessions(current_user: CurrentUser, db: DbSession):
             status=s.status,
             album_title=s.album_title,
             album_artist=s.album_artist,
-            album_cover_image=s.album_cover_image,
+            album_cover_image=await StorageService.resolve_profile_picture(s.album_cover_image),
             participants_count=count or 0,
             created_at=s.created_at,
             # Só expõe médias de sessão finalizada (em andamento seria spoiler
