@@ -306,7 +306,8 @@ Focus on their musical style, career trajectory, and what makes them notable.
 Write in a neutral, informative tone suitable for a music review platform.
 Do NOT invent specific facts about chart positions, sales numbers, or awards unless you're absolutely certain they are accurate.
 If you're not sure about specific details, keep it general about their style and influence.
-Write in Portuguese (Brazil).
+Write in English.
+Output PLAIN TEXT only: no markdown, no ** bold markers, no headings, no titles, no bullet points — just the paragraphs separated by blank lines. Do not start with a title line; begin directly with the first paragraph.
 
 Artist: {name}
 Genres: {genres_text}
@@ -320,7 +321,11 @@ Write the biography now:"""
             if not hasattr(response, 'text') or not response.text:
                 return None
 
-            return response.text.strip()
+            text = response.text.strip()
+            # Sanitização defensiva: remove markdown que o modelo insista em usar
+            text = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", text)   # **bold**/*italic*
+            text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)      # # headings
+            return text.strip()
 
         except Exception:
             return None
