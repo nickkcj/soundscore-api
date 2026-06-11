@@ -335,7 +335,8 @@ class SpotifyService:
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "include_groups": "album",
-                    "limit": min(limit, 50),
+                    # Spotify Dev Mode: limit > 10 retorna 400 neste endpoint
+                    "limit": min(limit, 10),
                 },
                 timeout=10.0,
             )
