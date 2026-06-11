@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
@@ -308,42 +308,18 @@ async def notification_event_generator(
 
 @router.get(
     "/notifications/stream",
-    summary="SSE stream for real-time notifications",
+    summary="[DESATIVADO] SSE substituído por Supabase Realtime",
+    deprecated=True,
 )
 async def notification_stream(current_user: QueryTokenUser):
     """
-    Server-Sent Events stream for real-time notifications.
-
-    Connect to this endpoint to receive notifications in real-time.
-
-    Example JavaScript:
-    ```javascript
-    const eventSource = new EventSource('/api/v1/feed/notifications/stream', {
-        headers: { 'Authorization': 'Bearer <token>' }
-    });
-
-    eventSource.addEventListener('notification', (event) => {
-        const notification = JSON.parse(event.data);
-        console.log('New notification:', notification);
-    });
-
-    eventSource.addEventListener('ping', () => {
-        console.log('Keepalive ping');
-    });
-    ```
+    Antigo stream SSE de notificações. Em Lambda + API Gateway um stream
+    infinito fica pendurado até o timeout de 29s, derrubando CORS no
+    navegador e gerando cold starts em cascata. Responde 410 imediatamente
+    para clientes antigos; os novos assinam a tabela notifications via
+    Supabase Realtime (mesmo mecanismo do chat).
     """
-    queue = NotificationService.register_sse_connection(current_user.id)
-
-    async def cleanup():
-        NotificationService.unregister_sse_connection(current_user.id, queue)
-
-    return StreamingResponse(
-        notification_event_generator(current_user.id, queue),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        },
-        background=cleanup,
+    raise HTTPException(
+        status_code=410,
+        detail="SSE stream removido. Use Supabase Realtime (tabela notifications).",
     )
