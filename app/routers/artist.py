@@ -1,5 +1,7 @@
 """Artist router for fetching artist details, albums, and AI-generated bios."""
 
+import logging
+
 from fastapi import APIRouter
 from sqlalchemy import select, func
 
@@ -12,6 +14,7 @@ from app.services.spotify_service import spotify_service
 from app.services.gemini_service import gemini_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -69,8 +72,10 @@ async def get_artist_details(
                 )
                 db.add(new_artist)
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            # Bio é opcional — mas o erro precisa aparecer no log (foi assim
+            # que o gemini-1.5 aposentado passou meses despercebido)
+            logger.warning(f"Falha ao gerar bio do artista {spotify_id}: {e}")
 
     # Get SoundScore stats for each album
     album_items = []

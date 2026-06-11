@@ -24,7 +24,9 @@ class GeminiService:
             if not settings.google_api_key:
                 raise ValueError("GOOGLE_API_KEY not configured")
             genai.configure(api_key=settings.google_api_key)
-            self._model = genai.GenerativeModel("gemini-1.5-flash")
+            # gemini-1.5-* foi aposentado pelo Google (404); 2.0-flash exige
+            # billing — 2.5-flash funciona no free tier desta chave
+            self._model = genai.GenerativeModel("gemini-2.5-flash")
             self._configured = True
 
     def convert_prompt_to_sql(self, prompt: str, history: Optional[str] = None) -> dict:
