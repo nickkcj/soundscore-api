@@ -1,8 +1,9 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.models.user import User, UserFollow
@@ -127,10 +128,27 @@ async def search_albums(
 
 # ============== Discover ==============
 
+class DiscoverReviewItem(BaseModel):
+    """Review result for the discover/search page."""
+    uuid: UUID
+    rating: int
+    text: str | None
+    is_favorite: bool
+    created_at: datetime
+    username: str
+    user_profile_picture: str | None = None
+    album_title: str
+    album_artist: str
+    album_cover_image: str | None = None
+    like_count: int = 0
+    comment_count: int = 0
+
+
 class DiscoverResponse(BaseModel):
     """Response schema for discover endpoint."""
     albums: list[AlbumWithRating]
     users: list[UserListItem]
+    reviews: list[DiscoverReviewItem] = []
 
 
 @router.get(
@@ -140,7 +158,7 @@ class DiscoverResponse(BaseModel):
 )
 async def discover(
     q: str = Query(..., min_length=1, description="Search query"),
-    type: str = Query("all", description="Type of search: albums, users, or all"),
+    type: str = Query("all", description="Type of search: albums, users, reviews, or all"),
     limit: int = Query(10, ge=1, le=10, description="Number of results per type (Spotify Dev Mode max: 10)"),
     db: DbSession = None,
     current_user: CurrentUser = None,
@@ -156,6 +174,7 @@ async def discover(
     """
     albums: list[AlbumWithRating] = []
     users: list[UserListItem] = []
+    reviews: list[DiscoverReviewItem] = []
 
     # Search albums on Spotify
     if type in ("albums", "all"):
@@ -233,7 +252,51 @@ async def discover(
                 is_following=user.id in following_ids if current_user else None,
             ))
 
-    return DiscoverResponse(albums=albums, users=users)
+    # Search reviews (texto da review ou título do álbum)
+    if type in ("reviews", "all"):
+        like_count_sq = (
+            select(func.count(ReviewLike.id))
+            .where(ReviewLike.review_id == Review.id)
+            .correlate(Review)
+            .scalar_subquery()
+        )
+        comment_count_sq = (
+            select(func.count(Comment.id))
+            .where(Comment.review_id == Review.id)
+            .correlate(Review)
+            .scalar_subquery()
+        )
+
+        review_query = await db.execute(
+            select(Review, like_count_sq, comment_count_sq)
+            .join(Album, Review.album_id == Album.id)
+            .options(selectinload(Review.album), selectinload(Review.user))
+            .where(or_(
+                Review.text.ilike(f"%{q}%"),
+                Album.title.ilike(f"%{q}%"),
+            ))
+            .order_by(Review.created_at.desc())
+            .limit(limit)
+        )
+
+        for review, like_count, comment_count in review_query.all():
+            profile_pic = await StorageService.resolve_profile_picture(review.user.profile_picture)
+            reviews.append(DiscoverReviewItem(
+                uuid=review.uuid,
+                rating=review.rating,
+                text=review.text,
+                is_favorite=review.is_favorite,
+                created_at=review.created_at,
+                username=review.user.username,
+                user_profile_picture=profile_pic,
+                album_title=review.album.title,
+                album_artist=review.album.artist,
+                album_cover_image=review.album.cover_image,
+                like_count=like_count or 0,
+                comment_count=comment_count or 0,
+            ))
+
+    return DiscoverResponse(albums=albums, users=users, reviews=reviews)
 
 
 # ============== Album Details ==============
