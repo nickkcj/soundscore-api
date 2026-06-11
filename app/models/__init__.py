@@ -6,6 +6,11 @@ from app.models.group import Group, GroupMember, GroupMessage, GroupInvite
 from app.models.chatbot import ChatMessage
 from app.models.artist import Artist
 from app.models.direct_message import Conversation, DirectMessage
+from app.models.listening_session import (
+    ListeningSession,
+    SessionParticipant,
+    SessionTrackRating,
+)
 
 __all__ = [
     "User",
@@ -23,4 +28,7 @@ __all__ = [
     "Artist",
     "Conversation",
     "DirectMessage",
+    "ListeningSession",
+    "SessionParticipant",
+    "SessionTrackRating",
 ]
