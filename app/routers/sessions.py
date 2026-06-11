@@ -133,6 +133,9 @@ async def _get_session(db, code: str) -> ListeningSession:
             selectinload(ListeningSession.participants).selectinload(SessionParticipant.user),
             selectinload(ListeningSession.ratings).selectinload(SessionTrackRating.user),
         )
+        # populate_existing: refetch dentro do mesmo request recarrega as
+        # relações (sem isso, o estado retornado após um INSERT vem stale)
+        .execution_options(populate_existing=True)
         .where(ListeningSession.code == code.upper())
     )
     session = result.scalar_one_or_none()
