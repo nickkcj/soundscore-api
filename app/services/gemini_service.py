@@ -258,7 +258,7 @@ Answer the user's question based on these results:
 Focus on what listeners might expect from the album based on the artist and tracklist.
 Write in a neutral, informative tone suitable for a music review platform.
 Do NOT invent specific facts about chart positions, sales, or awards unless you're certain.
-Write in Portuguese (Brazil).
+Write in English.
 
 Album: {title}
 Artist: {artist}
