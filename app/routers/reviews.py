@@ -550,7 +550,7 @@ async def update_review(
     # Update fields
     if update_data.rating is not None:
         review.rating = update_data.rating
-    if update_data.text is not None:
+    if "text" in update_data.model_fields_set:
         review.text = update_data.text
     if update_data.is_favorite is not None:
         review.is_favorite = update_data.is_favorite
