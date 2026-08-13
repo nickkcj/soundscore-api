@@ -17,6 +17,22 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate backend
+        run: |
+          python -m compileall -q app alembic
+          pytest -q
+        env:
+          DATABASE_URL: postgresql+asyncpg://user:password@localhost:5432/soundscore_test
+          JWT_SECRET_KEY: ci-only-not-a-production-secret
+
       # A Lambda é arm64; o runner é x86_64. O QEMU permite rodar o
       # container de build arm64 (serverless-python-requirements/dockerizePip)
       - name: Setup QEMU (build arm64)
