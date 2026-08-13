@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Query, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from app.schemas.review import (
     CommentListResponse,
     LikeResponse,
     SpotifyAlbumResult,
+    SpotifyArtistResult,
     AlbumResponse,
     AlbumWithRating,
     TrackItem,
@@ -147,6 +148,7 @@ class DiscoverReviewItem(BaseModel):
 class DiscoverResponse(BaseModel):
     """Response schema for discover endpoint."""
     albums: list[AlbumWithRating]
+    artists: list[SpotifyArtistResult] = Field(default_factory=list)
     users: list[UserListItem]
     reviews: list[DiscoverReviewItem] = []
 
@@ -154,25 +156,27 @@ class DiscoverResponse(BaseModel):
 @router.get(
     "/discover",
     response_model=DiscoverResponse,
-    summary="Discover albums and users",
+    summary="Discover albums, artists, users, and reviews",
 )
 async def discover(
     q: str = Query(..., min_length=1, description="Search query"),
-    type: str = Query("all", description="Type of search: albums, users, reviews, or all"),
+    type: str = Query("all", description="Type of search: albums, artists, users, reviews, or all"),
     limit: int = Query(10, ge=1, le=10, description="Number of results per type (Spotify Dev Mode max: 10)"),
     db: DbSession = None,
     current_user: CurrentUser = None,
 ):
     """
-    Search for albums on Spotify and users in the database.
+    Search Spotify and the SoundScore community.
 
     - **type=albums**: Only search Spotify albums
+    - **type=artists**: Only search Spotify artists
     - **type=users**: Only search users in database
     - **type=all**: Search both albums and users
 
     Returns albums with their average ratings and review counts from our database.
     """
     albums: list[AlbumWithRating] = []
+    artists: list[SpotifyArtistResult] = []
     users: list[UserListItem] = []
     reviews: list[DiscoverReviewItem] = []
 
@@ -214,6 +218,14 @@ async def discover(
                 ))
         except Exception:
             # If Spotify fails, return empty albums list
+            pass
+
+    # Search artists directly on Spotify so clients can navigate by stable artist ID.
+    if type in ("artists", "all"):
+        try:
+            artists = await spotify_service.search_artists(q, limit)
+        except Exception:
+            # Keep partial discover results available when Spotify fails.
             pass
 
     # Search users in database
@@ -296,7 +308,7 @@ async def discover(
                 comment_count=comment_count or 0,
             ))
 
-    return DiscoverResponse(albums=albums, users=users, reviews=reviews)
+    return DiscoverResponse(albums=albums, artists=artists, users=users, reviews=reviews)
 
 
 # ============== Album Details ==============

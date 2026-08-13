@@ -1,6 +1,6 @@
 """Library schemas for scrobbling and listening stats."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -36,6 +36,9 @@ class TopArtistResponse(BaseModel):
     name: str
     image: Optional[str] = None
     scrobble_count: Optional[int] = None  # Not available from Spotify API
+    spotify_id: Optional[str] = None
+    genres: list[str] = Field(default_factory=list)
+    popularity: Optional[int] = None
 
 
 class TopTrackResponse(BaseModel):
@@ -45,6 +48,7 @@ class TopTrackResponse(BaseModel):
     album: Optional[str]
     image: Optional[str]
     scrobble_count: int
+    track_id: Optional[str] = None
 
 
 class TopAlbumResponse(BaseModel):

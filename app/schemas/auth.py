@@ -34,6 +34,7 @@ class TokenPayload(BaseModel):
     sub: str  # username
     exp: int
     type: str  # "access" or "refresh"
+    user_id: int | None = None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -44,6 +45,12 @@ class RefreshTokenRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     """Schema for changing password."""
     current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
+class PasswordSetRequest(BaseModel):
+    """Set the first password for an authenticated social-login account."""
+
     new_password: str = Field(..., min_length=6)
 
 

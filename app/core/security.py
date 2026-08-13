@@ -22,7 +22,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(
+    subject: str,
+    expires_delta: Optional[timedelta] = None,
+    user_id: int | None = None,
+) -> str:
     """
     Create a JWT access token.
 
@@ -43,10 +47,12 @@ def create_access_token(subject: str, expires_delta: Optional[timedelta] = None)
         "exp": expire,
         "type": "access",
     }
+    if user_id is not None:
+        to_encode["user_id"] = user_id
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str, user_id: int | None = None) -> str:
     """
     Create a JWT refresh token.
 
@@ -63,6 +69,8 @@ def create_refresh_token(subject: str) -> str:
         "exp": expire,
         "type": "refresh",
     }
+    if user_id is not None:
+        to_encode["user_id"] = user_id
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -125,6 +133,32 @@ def verify_refresh_token(token: str) -> Optional[str]:
         return None
 
     return payload.get("sub")
+
+
+def create_oauth_link_token(user_id: int, provider: str) -> str:
+    """Create a short-lived token that authorizes linking an OAuth provider."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=5)
+    return jwt.encode(
+        {
+            "user_id": user_id,
+            "provider": provider,
+            "exp": expire,
+            "type": "oauth_link",
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def verify_oauth_link_token(token: str, provider: str) -> int | None:
+    """Return the authorized user ID for a matching OAuth provider."""
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "oauth_link":
+        return None
+    if payload.get("provider") != provider:
+        return None
+    user_id = payload.get("user_id")
+    return user_id if isinstance(user_id, int) else None
 
 
 def create_password_reset_token(email: str) -> str:

@@ -58,9 +58,8 @@ async def get_current_user(
         # Cache is stale, user deleted or deactivated - continue to DB lookup
 
     # Cache miss or stale - query DB
-    result = await db.execute(
-        select(User).where(User.username == username)
-    )
+    identity_filter = User.id == user_id if user_id is not None else User.username == username
+    result = await db.execute(select(User).where(identity_filter))
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -138,9 +137,8 @@ async def get_optional_user(
             return user
 
     # Cache miss - query DB
-    result = await db.execute(
-        select(User).where(User.username == username)
-    )
+    identity_filter = User.id == user_id if user_id is not None else User.username == username
+    result = await db.execute(select(User).where(identity_filter))
     user = result.scalar_one_or_none()
 
     if user is None or not user.is_active:
@@ -193,9 +191,8 @@ async def get_user_from_query_token(
             return user
 
     # Cache miss - query DB
-    result = await db.execute(
-        select(User).where(User.username == username)
-    )
+    identity_filter = User.id == user_id if user_id is not None else User.username == username
+    result = await db.execute(select(User).where(identity_filter))
     user = result.scalar_one_or_none()
 
     if user is None:

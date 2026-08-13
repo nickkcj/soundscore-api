@@ -12,6 +12,7 @@ from app.schemas.auth import (
     TokenResponse,
     RefreshTokenRequest,
     PasswordChangeRequest,
+    PasswordSetRequest,
     MessageResponse,
     PasswordResetRequest,
     PasswordResetConfirm,
@@ -22,7 +23,7 @@ from app.core.security import (
     verify_password,
     create_access_token,
     create_refresh_token,
-    verify_refresh_token,
+    decode_token,
     create_password_reset_token,
     verify_password_reset_token,
 )
@@ -124,8 +125,8 @@ async def login(
     await db.commit()
 
     # Generate tokens
-    access_token = create_access_token(subject=user.username)
-    refresh_token = create_refresh_token(subject=user.username)
+    access_token = create_access_token(subject=user.username, user_id=user.id)
+    refresh_token = create_refresh_token(subject=user.username, user_id=user.id)
 
     return TokenResponse(
         access_token=access_token,
@@ -144,14 +145,18 @@ async def refresh_token(request: RefreshTokenRequest, db: DbSession):
 
     - **refresh_token**: Valid refresh token from login
     """
-    username = verify_refresh_token(request.refresh_token)
+    payload = decode_token(request.refresh_token)
+    if payload is None or payload.get("type") != "refresh":
+        raise UnauthorizedException("Invalid or expired refresh token")
+
+    username = payload.get("sub")
+    user_id = payload.get("user_id")
     if username is None:
         raise UnauthorizedException("Invalid or expired refresh token")
 
     # Verify user still exists and is active
-    result = await db.execute(
-        select(User).where(User.username == username)
-    )
+    identity_filter = User.id == user_id if user_id is not None else User.username == username
+    result = await db.execute(select(User).where(identity_filter))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -161,8 +166,8 @@ async def refresh_token(request: RefreshTokenRequest, db: DbSession):
         raise UnauthorizedException("User account is inactive")
 
     # Generate new tokens
-    access_token = create_access_token(subject=user.username)
-    new_refresh_token = create_refresh_token(subject=user.username)
+    access_token = create_access_token(subject=user.username, user_id=user.id)
+    new_refresh_token = create_refresh_token(subject=user.username, user_id=user.id)
 
     return TokenResponse(
         access_token=access_token,
@@ -203,6 +208,25 @@ async def change_password(
     return MessageResponse(message="Password changed successfully")
 
 
+@router.post(
+    "/set-password",
+    response_model=MessageResponse,
+    summary="Set a password for a social-login account",
+)
+async def set_password(
+    request: PasswordSetRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """Add a password only when the authenticated account does not have one yet."""
+    if current_user.password_hash is not None:
+        raise BadRequestException("This account already has a password")
+
+    current_user.password_hash = hash_password(request.new_password)
+    await db.commit()
+    return MessageResponse(message="Password added successfully")
+
+
 @router.get(
     "/me",
     response_model=UserResponse,
@@ -214,12 +238,14 @@ async def get_me(current_user: CurrentUser):
     """
     # Resolve profile picture to signed URL
     profile_picture_url = await StorageService.resolve_profile_picture(current_user.profile_picture)
+    banner_image_url = await StorageService.resolve_banner_image(current_user.banner_image)
 
     return UserResponse(
         id=current_user.id,
         username=current_user.username,
         email=current_user.email,
         profile_picture=profile_picture_url,
+        banner_image=banner_image_url,
         bio=current_user.bio,
         created_at=current_user.created_at,
     )

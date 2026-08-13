@@ -2,7 +2,8 @@ import pytest
 from starlette.requests import Request
 
 from app.core.exceptions import BadRequestException
-from app.routers.oauth import configure_oauth_client
+from app.core.security import create_oauth_link_token
+from app.routers.oauth import configure_oauth_client, configure_oauth_link
 
 
 def request_with_session() -> Request:
@@ -49,3 +50,29 @@ def test_web_login_clears_a_stale_mobile_redirect() -> None:
     configure_oauth_client(request, "web", None)
 
     assert "oauth_mobile_redirect_uri" not in request.session
+
+
+def test_link_intent_binds_user_to_matching_provider() -> None:
+    request = request_with_session()
+    token = create_oauth_link_token(42, "spotify")
+
+    configure_oauth_link(request, "spotify", token)
+
+    assert request.session["oauth_link_user_id"] == 42
+
+
+def test_link_intent_rejects_a_different_provider() -> None:
+    request = request_with_session()
+    token = create_oauth_link_token(42, "google")
+
+    with pytest.raises(BadRequestException):
+        configure_oauth_link(request, "spotify", token)
+
+
+def test_login_without_link_token_clears_stale_link_intent() -> None:
+    request = request_with_session()
+    request.session["oauth_link_user_id"] = 42
+
+    configure_oauth_link(request, "spotify", None)
+
+    assert "oauth_link_user_id" not in request.session

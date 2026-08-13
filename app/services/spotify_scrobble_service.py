@@ -379,14 +379,16 @@ class SpotifyScrobbleService:
                 Scrobble.artist_name,
                 Scrobble.album_name,
                 Scrobble.album_image_url,
-                func.count(Scrobble.id).label('count')
+                func.count(Scrobble.id).label('count'),
+                Scrobble.track_id,
             )
             .where(Scrobble.user_id == user_id, Scrobble.played_at >= since)
             .group_by(
                 Scrobble.track_name,
                 Scrobble.artist_name,
                 Scrobble.album_name,
-                Scrobble.album_image_url
+                Scrobble.album_image_url,
+                Scrobble.track_id,
             )
             .order_by(func.count(Scrobble.id).desc())
             .limit(limit)
@@ -398,7 +400,8 @@ class SpotifyScrobbleService:
                 'artist': row[1],
                 'album': row[2],
                 'image': row[3],
-                'scrobble_count': row[4]
+                'scrobble_count': row[4],
+                'track_id': row[5],
             }
             for row in result.all()
         ]

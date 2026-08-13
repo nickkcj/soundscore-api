@@ -1,7 +1,7 @@
 """OAuth schemas."""
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 
@@ -26,3 +26,16 @@ class OAuthExchangeRequest(BaseModel):
     """Single-use authorization code returned to a native client."""
 
     code: str = Field(..., min_length=32, max_length=256)
+
+
+class OAuthLinkIntentRequest(BaseModel):
+    """Authenticated request to connect a provider to the current account."""
+
+    provider: Literal["google", "spotify"]
+    redirect_uri: str = Field(..., min_length=1, max_length=500)
+
+
+class OAuthLinkIntentResponse(BaseModel):
+    """Short-lived provider authorization URL for a native client."""
+
+    start_url: str

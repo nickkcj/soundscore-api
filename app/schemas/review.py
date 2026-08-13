@@ -31,6 +31,16 @@ class SpotifyAlbumResult(BaseModel):
     release_date: Optional[str] = None
 
 
+class SpotifyArtistResult(BaseModel):
+    """Spotify artist search result."""
+    spotify_id: str
+    name: str
+    image_url: Optional[str] = None
+    followers: int = 0
+    genres: list[str] = Field(default_factory=list)
+    popularity: int = 0
+
+
 # ============== Review Schemas ==============
 
 class ReviewCreate(BaseModel):

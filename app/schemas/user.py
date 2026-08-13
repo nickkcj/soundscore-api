@@ -38,7 +38,7 @@ class UserResponse(BaseModel):
 
 class UserProfileResponse(UserResponse):
     """Schema for user profile with stats."""
-    email: EmailStr
+    email: Optional[EmailStr] = None
     review_count: int = 0
     followers_count: int = 0
     following_count: int = 0

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
-from app.dependencies import DbSession, CurrentUser
+from app.dependencies import DbSession, CurrentUser, OptionalUser
 from app.services.spotify_scrobble_service import SpotifyScrobbleService
 from app.schemas.library import (
     NowPlayingResponse,
@@ -18,7 +18,7 @@ from app.schemas.library import (
     SyncResponse,
     SpotifyConnectionStatus,
 )
-from app.core.exceptions import NotFoundException, BadRequestException
+from app.core.exceptions import NotFoundException, BadRequestException, ForbiddenException
 
 router = APIRouter()
 
@@ -34,6 +34,15 @@ async def get_user_by_username(db: AsyncSession, username: str) -> User:
     return user
 
 
+def ensure_library_access(user: User, current_user: User | None) -> None:
+    """Allow public libraries and always allow owners to view their own data."""
+    if user.library_public:
+        return
+    if current_user is not None and current_user.id == user.id:
+        return
+    raise ForbiddenException("This library is private")
+
+
 # ============= Now Playing (Public) =============
 
 @router.get(
@@ -41,13 +50,18 @@ async def get_user_by_username(db: AsyncSession, username: str) -> User:
     response_model=NowPlayingResponse | None,
     summary="Get currently playing track for a user",
 )
-async def get_now_playing(username: str, db: DbSession):
+async def get_now_playing(
+    username: str,
+    db: DbSession,
+    current_user: OptionalUser = None,
+):
     """
     Get the currently playing track for a user.
     Returns null if nothing is playing or user doesn't have Spotify connected.
     This is a public endpoint.
     """
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     oauth = await service.get_spotify_oauth(user.id)
 
@@ -64,9 +78,14 @@ async def get_now_playing(username: str, db: DbSession):
     response_model=SpotifyConnectionStatus,
     summary="Check if user has Spotify connected",
 )
-async def get_spotify_status(username: str, db: DbSession):
+async def get_spotify_status(
+    username: str,
+    db: DbSession,
+    current_user: OptionalUser = None,
+):
     """Check if a user has their Spotify account connected."""
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     oauth = await service.get_spotify_oauth(user.id)
 
@@ -86,11 +105,13 @@ async def get_spotify_status(username: str, db: DbSession):
 async def get_scrobbles(
     username: str,
     db: DbSession,
+    current_user: OptionalUser = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
     """Get the listening history (scrobbles) for a user."""
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     scrobbles = await service.get_scrobbles(user.id, limit=limit, offset=offset)
     return scrobbles
@@ -106,10 +127,12 @@ async def get_scrobbles(
 async def get_stats(
     username: str,
     db: DbSession,
+    current_user: OptionalUser = None,
     days: int = Query(default=30, ge=1, le=365),
 ):
     """Get listening statistics for a user."""
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     stats = await service.get_stats(user.id, days=days)
     return stats
@@ -125,6 +148,7 @@ async def get_stats(
 async def get_top_artists(
     username: str,
     db: DbSession,
+    current_user: OptionalUser = None,
     time_range: str = Query(default='medium_term', pattern='^(short_term|medium_term|long_term)$'),
     limit: int = Query(default=10, ge=1, le=50),
 ):
@@ -137,6 +161,7 @@ async def get_top_artists(
     - long_term: calculated from several years of data
     """
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     oauth = await service.get_spotify_oauth(user.id)
 
@@ -157,11 +182,13 @@ async def get_top_artists(
 async def get_top_tracks(
     username: str,
     db: DbSession,
+    current_user: OptionalUser = None,
     days: int = Query(default=30, ge=1, le=365),
     limit: int = Query(default=10, ge=1, le=50),
 ):
     """Get top tracks for a user based on scrobble count."""
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     tracks = await service.get_top_tracks(user.id, days=days, limit=limit)
     return tracks
@@ -177,6 +204,7 @@ async def get_top_tracks(
 async def get_top_albums(
     username: str,
     db: DbSession,
+    current_user: OptionalUser = None,
     days: int = Query(default=30, ge=1, le=365),
     limit: int = Query(default=10, ge=1, le=50),
 ):
@@ -187,6 +215,7 @@ async def get_top_albums(
     Results are ordered by total scrobble count in descending order.
     """
     user = await get_user_by_username(db, username)
+    ensure_library_access(user, current_user)
     service = SpotifyScrobbleService(db)
     albums = await service.get_top_albums(user.id, days=days, limit=limit)
     return albums

@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from app.database import AsyncSessionLocal
 from app.models.user import User
 from app.models.direct_message import Conversation, DirectMessage
-from app.core.security import verify_access_token
+from app.core.security import decode_token
 from app.websockets.manager import ConnectionManager
 from app.services.storage_service import StorageService
 
@@ -21,13 +21,16 @@ dm_manager = ConnectionManager()
 
 async def get_user_from_token(token: str) -> User | None:
     """Validate JWT token and return user."""
-    username = verify_access_token(token)
-    if not username:
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "access" or not payload.get("sub"):
         return None
+
+    user_id = payload.get("user_id")
+    identity_filter = User.id == user_id if isinstance(user_id, int) else User.username == payload["sub"]
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(User).where(User.username == username)
+            select(User).where(identity_filter)
         )
         return result.scalar_one_or_none()
 

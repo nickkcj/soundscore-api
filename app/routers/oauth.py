@@ -20,12 +20,23 @@ from app.services.oauth_service import (
     get_spotify_user_info,
     is_provider_configured,
 )
-from app.core.security import create_access_token, create_refresh_token
-from app.core.exceptions import BadRequestException
+from app.core.security import (
+    create_access_token,
+    create_oauth_link_token,
+    create_refresh_token,
+    verify_oauth_link_token,
+)
+from app.core.exceptions import BadRequestException, ConflictException
 from app.config import get_settings
 from app.dependencies import DbSession, CurrentUser
-from app.schemas.auth import TokenResponse
-from app.schemas.oauth import LinkedAccountsResponse, OAuthAccountResponse, OAuthExchangeRequest
+from app.schemas.auth import MessageResponse, TokenResponse
+from app.schemas.oauth import (
+    LinkedAccountsResponse,
+    OAuthAccountResponse,
+    OAuthExchangeRequest,
+    OAuthLinkIntentRequest,
+    OAuthLinkIntentResponse,
+)
 
 router = APIRouter()
 settings = get_settings()
@@ -59,6 +70,17 @@ def configure_oauth_client(
         raise BadRequestException("Invalid mobile OAuth redirect URI")
 
     request.session["oauth_mobile_redirect_uri"] = redirect_uri
+
+
+def configure_oauth_link(request: Request, provider: str, link_token: str | None) -> None:
+    """Bind a validated native link intent to the signed OAuth session."""
+    request.session.pop("oauth_link_user_id", None)
+    if link_token is None:
+        return
+    user_id = verify_oauth_link_token(link_token, provider)
+    if user_id is None:
+        raise BadRequestException("Invalid or expired OAuth link request")
+    request.session["oauth_link_user_id"] = user_id
 
 
 async def generate_unique_username(db: AsyncSession, base_name: str) -> str:
@@ -107,6 +129,7 @@ async def find_or_create_user(
     access_token: str | None = None,
     refresh_token: str | None = None,
     expires_in: int | None = None,
+    link_user_id: int | None = None,
 ) -> User:
     """Find existing user or create new one from OAuth data."""
 
@@ -118,6 +141,47 @@ async def find_or_create_user(
         )
     )
     oauth_account = result.scalar_one_or_none()
+
+    if link_user_id is not None:
+        target_result = await db.execute(select(User).where(User.id == link_user_id))
+        target_user = target_result.scalar_one_or_none()
+        if target_user is None or not target_user.is_active:
+            raise BadRequestException("The account receiving this connection is unavailable")
+
+        if oauth_account and oauth_account.user_id != target_user.id:
+            raise ConflictException(f"This {provider.title()} account is linked to another user")
+
+        current_result = await db.execute(
+            select(OAuthAccount).where(
+                OAuthAccount.user_id == target_user.id,
+                OAuthAccount.provider == provider,
+            )
+        )
+        current_account = current_result.scalar_one_or_none()
+        if current_account and current_account.provider_user_id != provider_user_id:
+            raise ConflictException(f"A different {provider.title()} account is already connected")
+
+        linked_account = oauth_account or current_account
+        if linked_account is None:
+            linked_account = OAuthAccount(
+                user_id=target_user.id,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                provider_email=email,
+            )
+            db.add(linked_account)
+
+        linked_account.provider_email = email
+        linked_account.access_token = access_token
+        linked_account.refresh_token = refresh_token
+        linked_account.token_expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            if expires_in
+            else None
+        )
+        target_user.last_login = datetime.now(timezone.utc)
+        await db.commit()
+        return target_user
 
     if oauth_account:
         # User already has this OAuth linked, update tokens and get the user
@@ -238,8 +302,8 @@ async def create_auth_redirect(
             status_code=302,
         )
 
-    access_token = create_access_token(subject=user.username)
-    refresh_token = create_refresh_token(subject=user.username)
+    access_token = create_access_token(subject=user.username, user_id=user.id)
+    refresh_token = create_refresh_token(subject=user.username, user_id=user.id)
     return RedirectResponse(
         url=f"{frontend_url}/oauth/callback?{urlencode({'access_token': access_token, 'refresh_token': refresh_token})}",
         status_code=302,
@@ -253,12 +317,14 @@ async def google_login(
     request: Request,
     client: Literal["web", "mobile"] = Query(default="web"),
     redirect_uri: str | None = Query(default=None),
+    link_token: str | None = Query(default=None),
 ):
     """Initiate Google OAuth login."""
     if not is_provider_configured('google'):
         raise BadRequestException("Google OAuth is not configured")
 
     configure_oauth_client(request, client, redirect_uri)
+    configure_oauth_link(request, "google", link_token)
     redirect_uri = f"{settings.backend_url}/api/v1/oauth/google/callback"
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
@@ -270,6 +336,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
         raise BadRequestException("Google OAuth is not configured")
 
     try:
+        link_user_id = request.session.pop("oauth_link_user_id", None)
         token = await oauth.google.authorize_access_token(request)
 
         # Google returns user info in the ID token
@@ -290,6 +357,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
             provider_user_id=provider_user_id,
             email=email,
             name=name,
+            link_user_id=link_user_id,
         )
 
         if not user.is_active:
@@ -308,12 +376,14 @@ async def spotify_login(
     request: Request,
     client: Literal["web", "mobile"] = Query(default="web"),
     redirect_uri: str | None = Query(default=None),
+    link_token: str | None = Query(default=None),
 ):
     """Initiate Spotify OAuth login."""
     if not is_provider_configured('spotify'):
         raise BadRequestException("Spotify OAuth is not configured")
 
     configure_oauth_client(request, client, redirect_uri)
+    configure_oauth_link(request, "spotify", link_token)
     redirect_uri = f"{settings.backend_url}/api/v1/oauth/spotify/callback"
     return await oauth.spotify.authorize_redirect(request, redirect_uri)
 
@@ -325,6 +395,7 @@ async def spotify_callback(request: Request, db: AsyncSession = Depends(get_db))
         raise BadRequestException("Spotify OAuth is not configured")
 
     try:
+        link_user_id = request.session.pop("oauth_link_user_id", None)
         token = await oauth.spotify.authorize_access_token(request)
         access_token = token.get('access_token')
 
@@ -350,6 +421,7 @@ async def spotify_callback(request: Request, db: AsyncSession = Depends(get_db))
             access_token=access_token,
             refresh_token=token.get('refresh_token'),
             expires_in=token.get('expires_in'),
+            link_user_id=link_user_id,
         )
 
         if not user.is_active:
@@ -387,8 +459,38 @@ async def exchange_mobile_code(request: OAuthExchangeRequest, db: DbSession):
 
     await db.commit()
     return TokenResponse(
-        access_token=create_access_token(subject=user.username),
-        refresh_token=create_refresh_token(subject=user.username),
+        access_token=create_access_token(subject=user.username, user_id=user.id),
+        refresh_token=create_refresh_token(subject=user.username, user_id=user.id),
+    )
+
+
+@router.post("/mobile/link-intent", response_model=OAuthLinkIntentResponse)
+async def create_mobile_link_intent(
+    payload: OAuthLinkIntentRequest,
+    current_user: CurrentUser,
+):
+    """Create a short-lived URL that links a provider to the authenticated user."""
+    parsed = urlparse(payload.redirect_uri)
+    if (
+        parsed.scheme not in MOBILE_OAUTH_SCHEMES
+        or parsed.netloc != "oauth"
+        or parsed.path.rstrip("/") != "/callback"
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise BadRequestException("Invalid mobile OAuth redirect URI")
+
+    link_token = create_oauth_link_token(current_user.id, payload.provider)
+    query = urlencode(
+        {
+            "client": "mobile",
+            "redirect_uri": payload.redirect_uri,
+            "link_token": link_token,
+        }
+    )
+    return OAuthLinkIntentResponse(
+        start_url=f"{settings.backend_url}/api/v1/oauth/{payload.provider}/login?{query}"
     )
 
 
@@ -416,3 +518,32 @@ async def get_linked_accounts(current_user: CurrentUser, db: DbSession):
         spotify=spotify_account,
         has_password=current_user.password_hash is not None,
     )
+
+
+@router.delete("/linked-accounts/{provider}", response_model=MessageResponse)
+async def disconnect_linked_account(
+    provider: Literal["google", "spotify"],
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """Disconnect a provider without allowing the user to lock themselves out."""
+    result = await db.execute(
+        select(OAuthAccount).where(
+            OAuthAccount.user_id == current_user.id,
+            OAuthAccount.provider == provider,
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise BadRequestException(f"{provider.title()} is not connected")
+
+    accounts_result = await db.execute(
+        select(func.count()).select_from(OAuthAccount).where(OAuthAccount.user_id == current_user.id)
+    )
+    account_count = accounts_result.scalar() or 0
+    if current_user.password_hash is None and account_count <= 1:
+        raise BadRequestException("Add another sign-in method before disconnecting this account")
+
+    await db.delete(account)
+    await db.commit()
+    return MessageResponse(message=f"{provider.title()} disconnected successfully")

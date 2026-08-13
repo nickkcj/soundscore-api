@@ -35,6 +35,7 @@ router = APIRouter()
 @router.get(
     "/profile/{username}",
     response_model=UserProfileResponse,
+    response_model_exclude_none=True,
     summary="Get user profile",
 )
 async def get_user_profile(
@@ -101,7 +102,7 @@ async def get_user_profile(
     return UserProfileResponse(
         id=user.id,
         username=user.username,
-        email=user.email,
+        email=user.email if current_user and current_user.id == user.id else None,
         profile_picture=profile_picture_url,
         banner_image=banner_image_url,
         bio=user.bio,
@@ -111,6 +112,7 @@ async def get_user_profile(
         followers_count=followers_count,
         following_count=following_count,
         is_following=is_following,
+        library_public=user.library_public,
     )
 
 
@@ -150,7 +152,7 @@ async def update_profile(
         current_user.email = update_data.email.lower()
 
     # Update other fields
-    if update_data.bio is not None:
+    if "bio" in update_data.model_fields_set:
         current_user.bio = update_data.bio
 
     if update_data.profile_picture is not None:
@@ -158,6 +160,9 @@ async def update_profile(
 
     if update_data.banner_image is not None:
         current_user.banner_image = update_data.banner_image
+
+    if update_data.library_public is not None:
+        current_user.library_public = update_data.library_public
 
     await db.commit()
     await db.refresh(current_user)
@@ -544,7 +549,7 @@ async def upload_profile_picture(
         )
         await db.commit()
 
-        return await get_user_profile(current_user.username, db, None)
+        return await get_user_profile(current_user.username, db, current_user)
 
     except HTTPException:
         raise
@@ -611,7 +616,7 @@ async def upload_banner_image(
         )
         await db.commit()
 
-        return await get_user_profile(current_user.username, db, None)
+        return await get_user_profile(current_user.username, db, current_user)
 
     except HTTPException:
         raise
@@ -633,7 +638,15 @@ async def delete_account(current_user: CurrentUser, db: DbSession):
 
     **Warning:** This action cannot be undone!
     """
+    stored_media = [current_user.profile_picture, current_user.banner_image]
     await db.delete(current_user)
     await db.commit()
+
+    for media_path in stored_media:
+        if media_path and not media_path.startswith(("http://", "https://")):
+            try:
+                StorageService.delete_file(media_path)
+            except Exception as error:
+                logger.warning("Failed to remove account media %s: %s", media_path, error)
 
     return MessageResponse(message="Account deleted successfully")

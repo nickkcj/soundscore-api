@@ -7,7 +7,7 @@ from typing import Optional
 from httpx import HTTPStatusError
 
 from app.config import get_settings
-from app.schemas.review import SpotifyAlbumResult
+from app.schemas.review import SpotifyAlbumResult, SpotifyArtistResult
 from app.services.cache_service import CacheService, CacheKeys
 from app.services.http_client import get_http_client
 
@@ -141,6 +141,75 @@ class SpotifyService:
                 logger.error(f"Erro ao salvar no cache: {e}")
 
         return albums
+
+    async def search_artists(self, query: str, limit: int = 10) -> list[SpotifyArtistResult]:
+        """Search Spotify artists, returning stable IDs and artist metadata."""
+        normalized_query = query.strip()
+        if not normalized_query:
+            return []
+
+        query_hash = hashlib.md5(
+            f"artist:{normalized_query.lower()}:{limit}".encode()
+        ).hexdigest()
+        cache_key = f"{CacheKeys.SPOTIFY_SEARCH}{query_hash}"
+
+        try:
+            cached = await CacheService.get_json(cache_key)
+            if cached:
+                return [SpotifyArtistResult(**item) for item in cached]
+        except Exception as e:
+            logger.error(f"Erro ao ler cache de artistas: {e}")
+
+        token = await self._get_access_token()
+        client = get_http_client()
+        try:
+            response = await client.get(
+                f"{self.API_BASE_URL}/search",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "q": normalized_query,
+                    "type": "artist",
+                    "limit": min(limit, 10),
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except HTTPStatusError as e:
+            error_body = e.response.json() if e.response.content else e.response.text
+            logger.error(f"Spotify API Error {e.response.status_code}: {error_body}")
+            return []
+        except Exception as e:
+            logger.error(f"Erro inesperado na busca de artistas do Spotify: {e}")
+            return []
+
+        artists: list[SpotifyArtistResult] = []
+        for item in data.get("artists", {}).get("items", []):
+            try:
+                artists.append(
+                    SpotifyArtistResult(
+                        spotify_id=item["id"],
+                        name=item["name"],
+                        image_url=item["images"][0]["url"] if item.get("images") else None,
+                        followers=item.get("followers", {}).get("total", 0),
+                        genres=item.get("genres", []),
+                        popularity=item.get("popularity", 0),
+                    )
+                )
+            except (KeyError, IndexError, TypeError) as e:
+                logger.warning(f"Erro ao parsear artista do Spotify: {e}")
+
+        if artists:
+            try:
+                await CacheService.set_json(
+                    cache_key,
+                    [artist.model_dump() for artist in artists],
+                    ttl=3600,
+                )
+            except Exception as e:
+                logger.error(f"Erro ao salvar cache de artistas: {e}")
+
+        return artists
 
     async def get_album(self, spotify_id: str) -> Optional[SpotifyAlbumResult]:
         """
