@@ -1,6 +1,6 @@
 """OAuth schemas."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -20,3 +20,9 @@ class LinkedAccountsResponse(BaseModel):
     google: Optional[OAuthAccountResponse] = None
     spotify: Optional[OAuthAccountResponse] = None
     has_password: bool
+
+
+class OAuthExchangeRequest(BaseModel):
+    """Single-use authorization code returned to a native client."""
+
+    code: str = Field(..., min_length=32, max_length=256)

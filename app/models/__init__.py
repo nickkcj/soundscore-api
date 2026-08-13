@@ -11,6 +11,7 @@ from app.models.listening_session import (
     SessionParticipant,
     SessionTrackRating,
 )
+from app.models.oauth import OAuthAccount, OAuthExchangeCode
 
 __all__ = [
     "User",
@@ -31,4 +32,6 @@ __all__ = [
     "ListeningSession",
     "SessionParticipant",
     "SessionTrackRating",
+    "OAuthAccount",
+    "OAuthExchangeCode",
 ]

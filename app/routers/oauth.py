@@ -1,17 +1,20 @@
 """OAuth router for Google and Spotify authentication."""
 
+import hashlib
 import secrets
 import re
 from datetime import datetime, timezone, timedelta
+from typing import Literal
+from urllib.parse import urlencode, urlparse
 
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
-from app.models.oauth import OAuthAccount
+from app.models.oauth import OAuthAccount, OAuthExchangeCode
 from app.services.oauth_service import (
     oauth,
     get_spotify_user_info,
@@ -21,10 +24,41 @@ from app.core.security import create_access_token, create_refresh_token
 from app.core.exceptions import BadRequestException
 from app.config import get_settings
 from app.dependencies import DbSession, CurrentUser
-from app.schemas.oauth import LinkedAccountsResponse, OAuthAccountResponse
+from app.schemas.auth import TokenResponse
+from app.schemas.oauth import LinkedAccountsResponse, OAuthAccountResponse, OAuthExchangeRequest
 
 router = APIRouter()
 settings = get_settings()
+
+MOBILE_OAUTH_SCHEMES = {"soundscore", "soundscore-dev", "soundscore-preview"}
+MOBILE_EXCHANGE_CODE_TTL_SECONDS = 120
+
+
+def configure_oauth_client(
+    request: Request,
+    client: Literal["web", "mobile"],
+    redirect_uri: str | None,
+) -> None:
+    """Persist a validated OAuth client target in the signed session cookie."""
+    request.session.pop("oauth_mobile_redirect_uri", None)
+    if client == "web":
+        return
+
+    if not redirect_uri:
+        raise BadRequestException("A redirect URI is required for mobile OAuth")
+
+    parsed = urlparse(redirect_uri)
+    if (
+        parsed.scheme not in MOBILE_OAUTH_SCHEMES
+        or parsed.netloc != "oauth"
+        or parsed.path.rstrip("/") != "/callback"
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise BadRequestException("Invalid mobile OAuth redirect URI")
+
+    request.session["oauth_mobile_redirect_uri"] = redirect_uri
 
 
 async def generate_unique_username(db: AsyncSession, base_name: str) -> str:
@@ -162,33 +196,69 @@ async def find_or_create_user(
     return new_user
 
 
-def create_frontend_redirect(user: User, error: str | None = None) -> RedirectResponse:
-    """Create redirect to frontend with tokens or error."""
-    frontend_url = settings.frontend_url
+async def create_auth_redirect(
+    request: Request,
+    db: AsyncSession,
+    user: User | None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """Return web tokens or a short-lived code for an approved native callback."""
+    mobile_redirect_uri = request.session.pop("oauth_mobile_redirect_uri", None) or getattr(
+        request.state,
+        "oauth_mobile_redirect_uri",
+        None,
+    )
+    request.state.oauth_mobile_redirect_uri = mobile_redirect_uri
 
-    if error:
+    if mobile_redirect_uri:
+        if error or user is None:
+            query = urlencode({"error": error or "OAuth sign-in failed"})
+            return RedirectResponse(url=f"{mobile_redirect_uri}?{query}", status_code=302)
+
+        raw_code = secrets.token_urlsafe(48)
+        code_hash = hashlib.sha256(raw_code.encode("utf-8")).hexdigest()
+        db.add(
+            OAuthExchangeCode(
+                code_hash=code_hash,
+                user_id=user.id,
+                expires_at=datetime.now(timezone.utc)
+                + timedelta(seconds=MOBILE_EXCHANGE_CODE_TTL_SECONDS),
+            )
+        )
+        await db.commit()
         return RedirectResponse(
-            url=f"{frontend_url}/oauth/callback?error={error}",
-            status_code=302
+            url=f"{mobile_redirect_uri}?{urlencode({'code': raw_code})}",
+            status_code=302,
+        )
+
+    frontend_url = settings.frontend_url
+    if error or user is None:
+        return RedirectResponse(
+            url=f"{frontend_url}/oauth/callback?{urlencode({'error': error or 'OAuth sign-in failed'})}",
+            status_code=302,
         )
 
     access_token = create_access_token(subject=user.username)
     refresh_token = create_refresh_token(subject=user.username)
-
     return RedirectResponse(
-        url=f"{frontend_url}/oauth/callback?access_token={access_token}&refresh_token={refresh_token}",
-        status_code=302
+        url=f"{frontend_url}/oauth/callback?{urlencode({'access_token': access_token, 'refresh_token': refresh_token})}",
+        status_code=302,
     )
 
 
 # ============= Google OAuth =============
 
 @router.get("/google/login")
-async def google_login(request: Request):
+async def google_login(
+    request: Request,
+    client: Literal["web", "mobile"] = Query(default="web"),
+    redirect_uri: str | None = Query(default=None),
+):
     """Initiate Google OAuth login."""
     if not is_provider_configured('google'):
         raise BadRequestException("Google OAuth is not configured")
 
+    configure_oauth_client(request, client, redirect_uri)
     redirect_uri = f"{settings.backend_url}/api/v1/oauth/google/callback"
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
@@ -205,14 +275,14 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
         # Google returns user info in the ID token
         user_info = token.get('userinfo')
         if not user_info:
-            return create_frontend_redirect(None, error="Failed to get user info from Google")
+            return await create_auth_redirect(request, db, None, error="Failed to get user info from Google")
 
         provider_user_id = user_info.get('sub')
         email = user_info.get('email')
         name = user_info.get('name') or user_info.get('given_name')
 
         if not provider_user_id:
-            return create_frontend_redirect(None, error="Invalid Google user data")
+            return await create_auth_redirect(request, db, None, error="Invalid Google user data")
 
         user = await find_or_create_user(
             db=db,
@@ -223,22 +293,27 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
         )
 
         if not user.is_active:
-            return create_frontend_redirect(None, error="User account is inactive")
+            return await create_auth_redirect(request, db, None, error="User account is inactive")
 
-        return create_frontend_redirect(user)
+        return await create_auth_redirect(request, db, user)
 
-    except Exception as e:
-        return create_frontend_redirect(None, error=f"OAuth error: {str(e)}")
+    except Exception:
+        return await create_auth_redirect(request, db, None, error="Google sign-in failed")
 
 
 # ============= Spotify OAuth =============
 
 @router.get("/spotify/login")
-async def spotify_login(request: Request):
+async def spotify_login(
+    request: Request,
+    client: Literal["web", "mobile"] = Query(default="web"),
+    redirect_uri: str | None = Query(default=None),
+):
     """Initiate Spotify OAuth login."""
     if not is_provider_configured('spotify'):
         raise BadRequestException("Spotify OAuth is not configured")
 
+    configure_oauth_client(request, client, redirect_uri)
     redirect_uri = f"{settings.backend_url}/api/v1/oauth/spotify/callback"
     return await oauth.spotify.authorize_redirect(request, redirect_uri)
 
@@ -254,7 +329,7 @@ async def spotify_callback(request: Request, db: AsyncSession = Depends(get_db))
         access_token = token.get('access_token')
 
         if not access_token:
-            return create_frontend_redirect(None, error="Failed to get access token from Spotify")
+            return await create_auth_redirect(request, db, None, error="Failed to get access token from Spotify")
 
         # Fetch user info from Spotify API
         user_info = await get_spotify_user_info(access_token)
@@ -264,7 +339,7 @@ async def spotify_callback(request: Request, db: AsyncSession = Depends(get_db))
         name = user_info.get('display_name')
 
         if not provider_user_id:
-            return create_frontend_redirect(None, error="Invalid Spotify user data")
+            return await create_auth_redirect(request, db, None, error="Invalid Spotify user data")
 
         user = await find_or_create_user(
             db=db,
@@ -278,12 +353,43 @@ async def spotify_callback(request: Request, db: AsyncSession = Depends(get_db))
         )
 
         if not user.is_active:
-            return create_frontend_redirect(None, error="User account is inactive")
+            return await create_auth_redirect(request, db, None, error="User account is inactive")
 
-        return create_frontend_redirect(user)
+        return await create_auth_redirect(request, db, user)
 
-    except Exception as e:
-        return create_frontend_redirect(None, error=f"OAuth error: {str(e)}")
+    except Exception:
+        return await create_auth_redirect(request, db, None, error="Spotify sign-in failed")
+
+
+@router.post("/mobile/exchange", response_model=TokenResponse)
+async def exchange_mobile_code(request: OAuthExchangeRequest, db: DbSession):
+    """Atomically exchange a short-lived native authorization code for JWTs."""
+    now = datetime.now(timezone.utc)
+    code_hash = hashlib.sha256(request.code.encode("utf-8")).hexdigest()
+    result = await db.execute(
+        update(OAuthExchangeCode)
+        .where(
+            OAuthExchangeCode.code_hash == code_hash,
+            OAuthExchangeCode.consumed_at.is_(None),
+            OAuthExchangeCode.expires_at > now,
+        )
+        .values(consumed_at=now)
+        .returning(OAuthExchangeCode.user_id)
+    )
+    user_id = result.scalar_one_or_none()
+    if user_id is None:
+        raise BadRequestException("Invalid or expired authorization code")
+
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise BadRequestException("Invalid or expired authorization code")
+
+    await db.commit()
+    return TokenResponse(
+        access_token=create_access_token(subject=user.username),
+        refresh_token=create_refresh_token(subject=user.username),
+    )
 
 
 # ============= Account Management =============
