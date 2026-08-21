@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.group import GroupMember, GroupMessage
     from app.models.chatbot import ChatMessage
     from app.models.oauth import OAuthAccount
+    from app.models.push_device import PushDevice
     from app.models.scrobble import Scrobble
 
 
@@ -89,6 +90,10 @@ class User(Base):
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan"
+    )
+    push_devices: Mapped[list["PushDevice"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
     scrobbles: Mapped[list["Scrobble"]] = relationship(
         back_populates="user",

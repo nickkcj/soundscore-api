@@ -221,6 +221,7 @@ async def follow_user(
     )
 
     await db.commit()
+    await NotificationService.push_generic_activity(db, target_user.id)
 
     # Invalidate current user's feed cache (now includes new user's reviews)
     await CacheInvalidation.on_follow_change(current_user.id)

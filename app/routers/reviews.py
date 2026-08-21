@@ -806,6 +806,9 @@ async def create_comment(
         )
 
     await db.commit()
+    recipient_id = parent_comment.user_id if parent_comment else review.user_id
+    if recipient_id != current_user.id:
+        await NotificationService.push_generic_activity(db, recipient_id)
 
     # Resolve profile picture URL
     profile_picture_url = await StorageService.resolve_profile_picture(current_user.profile_picture)
@@ -1099,6 +1102,8 @@ async def toggle_like(
         )
 
     await db.commit()
+    if liked and review.user_id != current_user.id:
+        await NotificationService.push_generic_activity(db, review.user_id)
 
     # Get updated count
     count_result = await db.execute(

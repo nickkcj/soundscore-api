@@ -23,6 +23,7 @@ from app.schemas.direct_message import (
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException
 from app.dependencies import CurrentUser, DbSession
 from app.services.storage_service import StorageService
+from app.services.push_service import push_service
 from app.config import get_settings
 
 router = APIRouter()
@@ -298,11 +299,50 @@ async def send_message(
     if current_user.id not in (conv.user1_id, conv.user2_id):
         raise ForbiddenException("Not a participant of this conversation")
 
+    content = body.content.strip()
+    image_path = body.image_path or body.image_url
+    if not content and not image_path:
+        raise BadRequestException("Message must have content or an image")
+    if image_path and not image_path.startswith(
+        f"dm_images/{conversation_id}/{current_user.id}_"
+    ):
+        raise ForbiddenException("Invalid message image")
+
+    profile_picture = await StorageService.resolve_profile_picture(current_user.profile_picture)
+    if body.client_id:
+        existing_result = await db.execute(
+            select(DirectMessage).where(
+                DirectMessage.conversation_id == conversation_id,
+                DirectMessage.sender_id == current_user.id,
+                DirectMessage.client_id == body.client_id,
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            return DirectMessageResponse(
+                id=existing.id,
+                conversation_id=existing.conversation_id,
+                sender_id=current_user.id,
+                sender_username=current_user.username,
+                sender_profile_picture=profile_picture,
+                content=existing.content,
+                image_url=(
+                    await StorageService.get_signed_url(existing.image_url, expires_in=3600)
+                    if existing.image_url
+                    else None
+                ),
+                client_id=existing.client_id,
+                is_read=existing.is_read,
+                created_at=existing.created_at,
+            )
+
     # Create message
     message = DirectMessage(
         conversation_id=conversation_id,
         sender_id=current_user.id,
-        content=body.content,
+        content=content,
+        image_url=image_path,
+        client_id=body.client_id,
     )
     db.add(message)
 
@@ -311,8 +351,8 @@ async def send_message(
 
     await db.commit()
     await db.refresh(message)
-
-    profile_picture = await StorageService.resolve_profile_picture(current_user.profile_picture)
+    recipient_id = conv.user2_id if current_user.id == conv.user1_id else conv.user1_id
+    await push_service.send_to_user(db, recipient_id, destination="/messages")
 
     return DirectMessageResponse(
         id=message.id,
@@ -321,7 +361,12 @@ async def send_message(
         sender_username=current_user.username,
         sender_profile_picture=profile_picture,
         content=message.content,
-        image_url=None,
+        image_url=(
+            await StorageService.get_signed_url(message.image_url, expires_in=3600)
+            if message.image_url
+            else None
+        ),
+        client_id=message.client_id,
         is_read=False,
         created_at=message.created_at,
     )

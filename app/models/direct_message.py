@@ -70,6 +70,7 @@ class DirectMessage(Base):
     )
     content: Mapped[str] = mapped_column(Text)
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    client_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -81,6 +82,15 @@ class DirectMessage(Base):
     # Relationships
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
     sender: Mapped["User"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "sender_id",
+            "client_id",
+            name="uq_direct_messages_sender_client_id",
+        ),
+    )
 
     def __repr__(self) -> str:
         return f"<DirectMessage {self.id} in conversation {self.conversation_id}>"

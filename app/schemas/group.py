@@ -77,7 +77,10 @@ class GroupMemberListResponse(BaseModel):
 class GroupMessageCreate(BaseModel):
     """Schema for creating a group message (text and/or image)."""
     content: str = Field("", max_length=5000)
+    image_path: Optional[str] = Field(None, max_length=500)
+    # Backwards-compatible alias for clients deployed before image_path.
     image_url: Optional[str] = Field(None, max_length=500)
+    client_id: Optional[str] = Field(None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class GroupMessageResponse(BaseModel):
@@ -85,6 +88,7 @@ class GroupMessageResponse(BaseModel):
     id: int
     content: str
     image_url: Optional[str] = None
+    client_id: Optional[str] = None
     created_at: datetime
 
     # User info

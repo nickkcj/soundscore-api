@@ -6,8 +6,12 @@ from pydantic import BaseModel, Field
 
 
 class SendMessageRequest(BaseModel):
-    """Schema for sending a direct message."""
-    content: str = Field(..., min_length=1, max_length=5000)
+    """Schema for sending a direct message with text and/or an uploaded image."""
+    content: str = Field("", max_length=5000)
+    image_path: Optional[str] = Field(None, max_length=500)
+    # Backwards-compatible field used by the existing web client.
+    image_url: Optional[str] = Field(None, max_length=500)
+    client_id: Optional[str] = Field(None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class ShareReviewRequest(BaseModel):
@@ -32,6 +36,7 @@ class DirectMessageResponse(BaseModel):
     sender_profile_picture: Optional[str] = None
     content: str
     image_url: Optional[str] = None
+    client_id: Optional[str] = None
     is_read: bool
     created_at: datetime
 

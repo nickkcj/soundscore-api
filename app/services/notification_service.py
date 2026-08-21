@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.feed import Notification
 from app.models.review import Review, Comment
 from app.models.group import Group, GroupInvite
+from app.services.push_service import push_service
 from app.services.storage_service import StorageService
 
 
@@ -44,6 +45,11 @@ class NotificationService:
         if user_id in cls._sse_connections:
             for queue in cls._sse_connections[user_id]:
                 await queue.put(notification_data)
+
+    @staticmethod
+    async def push_generic_activity(db: AsyncSession, recipient_id: int) -> None:
+        """Deliver a privacy-preserving remote alert after the domain write commits."""
+        await push_service.send_to_user(db, recipient_id, destination="/notifications")
 
     @staticmethod
     async def create_notification(

@@ -301,15 +301,17 @@ async def get_group(
             )
         )
 
-    # Get recent messages
-    messages_result = await db.execute(
-        select(GroupMessage)
-        .options(selectinload(GroupMessage.user))
-        .where(GroupMessage.group_id == group.id)
-        .order_by(GroupMessage.created_at.desc())
-        .limit(50)
-    )
-    messages = messages_result.scalars().all()
+    # Public group metadata is discoverable, but chat history is member-only.
+    messages = []
+    if is_member:
+        messages_result = await db.execute(
+            select(GroupMessage)
+            .options(selectinload(GroupMessage.user))
+            .where(GroupMessage.group_id == group.id)
+            .order_by(GroupMessage.created_at.desc())
+            .limit(50)
+        )
+        messages = messages_result.scalars().all()
 
     # Build message responses with resolved profile pictures and image URLs
     message_responses = []
@@ -769,7 +771,9 @@ async def get_group_members(
         raise NotFoundException("Group not found")
 
     # Check access for private groups
-    if group.privacy == "private" and current_user:
+    if group.privacy == "private":
+        if not current_user:
+            raise ForbiddenException("This is a private group")
         member_check = await db.execute(
             select(GroupMember).where(
                 GroupMember.group_id == group.id,
@@ -914,7 +918,8 @@ async def send_group_message(
     broadcasts the INSERT on group_messages to subscribed clients.
     """
     content = message_data.content.strip()
-    if not content and not message_data.image_url:
+    image_path = message_data.image_path or message_data.image_url
+    if not content and not image_path:
         raise BadRequestException("Message must have content or an image")
 
     # Get group
@@ -935,17 +940,48 @@ async def send_group_message(
     if not member_result.scalar_one_or_none():
         raise ForbiddenException("Not a member of this group")
 
+    if image_path and not image_path.startswith(
+        f"group_message_images/{group.id}/{current_user.id}_"
+    ):
+        raise ForbiddenException("Invalid message image")
+
+    profile_url = await StorageService.resolve_profile_picture(current_user.profile_picture)
+    if message_data.client_id:
+        existing_result = await db.execute(
+            select(GroupMessage).where(
+                GroupMessage.group_id == group.id,
+                GroupMessage.user_id == current_user.id,
+                GroupMessage.client_id == message_data.client_id,
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            return GroupMessageResponse(
+                id=existing.id,
+                content=existing.content,
+                image_url=(
+                    await StorageService.get_signed_url(existing.image_url, expires_in=3600)
+                    if existing.image_url
+                    else None
+                ),
+                client_id=existing.client_id,
+                created_at=existing.created_at,
+                user_id=current_user.id,
+                username=current_user.username,
+                profile_picture=profile_url,
+            )
+
     message = GroupMessage(
         group_id=group.id,
         user_id=current_user.id,
         content=content,
-        image_url=message_data.image_url,
+        image_url=image_path,
+        client_id=message_data.client_id,
     )
     db.add(message)
     await db.flush()
     await db.refresh(message)
 
-    profile_url = await StorageService.resolve_profile_picture(current_user.profile_picture)
     resolved_image_url = None
     if message.image_url:
         resolved_image_url = await StorageService.get_signed_url(message.image_url, expires_in=3600)
@@ -954,6 +990,7 @@ async def send_group_message(
         id=message.id,
         content=message.content,
         image_url=resolved_image_url,
+        client_id=message.client_id,
         created_at=message.created_at,
         user_id=current_user.id,
         username=current_user.username,
@@ -1109,6 +1146,8 @@ async def create_invite(
         invite=invite,
         recipient_id=invitee.id,
     )
+    await db.commit()
+    await NotificationService.push_generic_activity(db, invitee.id)
 
     return await _build_invite_response(invite, db)
 

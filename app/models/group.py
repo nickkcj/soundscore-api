@@ -183,6 +183,7 @@ class GroupMessage(Base):
     )
     content: Mapped[str] = mapped_column(Text)
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    client_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -194,6 +195,15 @@ class GroupMessage(Base):
     # Relationships
     group: Mapped["Group"] = relationship(back_populates="messages")
     user: Mapped["User"] = relationship(back_populates="group_messages")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "group_id",
+            "user_id",
+            "client_id",
+            name="uq_group_messages_user_client_id",
+        ),
+    )
 
     def __repr__(self) -> str:
         return f"<GroupMessage {self.id} in {self.group_id}>"

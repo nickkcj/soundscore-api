@@ -12,6 +12,7 @@ from app.models.listening_session import (
     SessionTrackRating,
 )
 from app.models.oauth import OAuthAccount, OAuthExchangeCode
+from app.models.push_device import PushDevice
 
 __all__ = [
     "User",
@@ -34,4 +35,5 @@ __all__ = [
     "SessionTrackRating",
     "OAuthAccount",
     "OAuthExchangeCode",
+    "PushDevice",
 ]

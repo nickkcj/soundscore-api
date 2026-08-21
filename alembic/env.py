@@ -1,5 +1,6 @@
 import asyncio
 from logging.config import fileConfig
+from uuid import uuid4
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -20,6 +21,7 @@ from app.models import (
     Artist,
     Conversation,
     DirectMessage,
+    PushDevice,
 )
 
 # Alembic Config object
@@ -75,6 +77,9 @@ async def run_async_migrations() -> None:
         connect_args={
             "statement_cache_size": 0,  # Required for pgbouncer (Supabase)
             "prepared_statement_cache_size": 0,
+            # Transaction-mode poolers can reuse a server connection that still
+            # contains statement names created by another client connection.
+            "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
         },
     )
 
