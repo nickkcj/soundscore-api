@@ -42,6 +42,9 @@ router = APIRouter()
 settings = get_settings()
 
 MOBILE_OAUTH_SCHEMES = {"soundscore", "soundscore-dev", "soundscore-preview"}
+MOBILE_OAUTH_HTTPS_REDIRECTS = {
+    "https://www.soundscore.com.br/reviews/oauth/callback",
+}
 MOBILE_EXCHANGE_CODE_TTL_SECONDS = 120
 
 
@@ -59,10 +62,14 @@ def configure_oauth_client(
         raise BadRequestException("A redirect URI is required for mobile OAuth")
 
     parsed = urlparse(redirect_uri)
+    is_native_scheme = (
+        parsed.scheme in MOBILE_OAUTH_SCHEMES
+        and parsed.netloc == "oauth"
+        and parsed.path.rstrip("/") == "/callback"
+    )
+    is_verified_app_link = redirect_uri in MOBILE_OAUTH_HTTPS_REDIRECTS
     if (
-        parsed.scheme not in MOBILE_OAUTH_SCHEMES
-        or parsed.netloc != "oauth"
-        or parsed.path.rstrip("/") != "/callback"
+        not (is_native_scheme or is_verified_app_link)
         or parsed.params
         or parsed.query
         or parsed.fragment

@@ -16,6 +16,7 @@ def request_with_session() -> Request:
         "soundscore://oauth/callback",
         "soundscore-dev://oauth/callback",
         "soundscore-preview://oauth/callback",
+        "https://www.soundscore.com.br/reviews/oauth/callback",
     ],
 )
 def test_mobile_redirect_accepts_only_app_variants(redirect_uri: str) -> None:
@@ -31,6 +32,8 @@ def test_mobile_redirect_accepts_only_app_variants(redirect_uri: str) -> None:
     [
         None,
         "https://evil.example/oauth/callback",
+        "https://soundscore.com.br/reviews/oauth/callback",
+        "https://www.soundscore.com.br/reviews/another-callback",
         "soundscore://other/callback",
         "soundscore://oauth/callback?code=attacker",
         "soundscore://oauth/callback#fragment",
