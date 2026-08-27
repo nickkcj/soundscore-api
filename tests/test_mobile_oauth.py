@@ -3,7 +3,7 @@ from starlette.requests import Request
 
 from app.core.exceptions import BadRequestException
 from app.core.security import create_oauth_link_token
-from app.routers.oauth import configure_oauth_client, configure_oauth_link
+from app.routers.oauth import configure_oauth_client, configure_oauth_link, create_mobile_app_bridge
 
 
 def request_with_session() -> Request:
@@ -79,3 +79,17 @@ def test_login_without_link_token_clears_stale_link_intent() -> None:
     configure_oauth_link(request, "spotify", None)
 
     assert "oauth_link_user_id" not in request.session
+
+
+def test_android_bridge_auto_opens_and_offers_a_button() -> None:
+    response = create_mobile_app_bridge(
+        "soundscore://oauth/callback",
+        "code=single-use-code",
+    )
+    body = response.body.decode()
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert "Open SoundScore" in body
+    assert "intent://oauth/callback?code=single-use-code" in body
+    assert "scheme=soundscore;package=br.com.soundscore.app" in body

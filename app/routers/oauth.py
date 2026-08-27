@@ -1,6 +1,8 @@
 """OAuth router for Google and Spotify authentication."""
 
+import html
 import hashlib
+import json
 import secrets
 import re
 from datetime import datetime, timezone, timedelta
@@ -8,7 +10,7 @@ from typing import Literal
 from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Request, Depends, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,7 +47,59 @@ MOBILE_OAUTH_SCHEMES = {"soundscore", "soundscore-dev", "soundscore-preview"}
 MOBILE_OAUTH_HTTPS_REDIRECTS = {
     "https://www.soundscore.com.br/reviews/oauth/callback",
 }
+MOBILE_ANDROID_PACKAGES = {
+    "soundscore": "br.com.soundscore.app",
+    "soundscore-dev": "br.com.soundscore.app.dev",
+    "soundscore-preview": "br.com.soundscore.app.preview",
+}
 MOBILE_EXCHANGE_CODE_TTL_SECONDS = 120
+
+
+def create_mobile_app_bridge(redirect_uri: str, query: str) -> HTMLResponse:
+    """Render a user-activated Android handoff when Custom Tabs block redirects."""
+    parsed = urlparse(redirect_uri)
+    package_name = MOBILE_ANDROID_PACKAGES[parsed.scheme]
+    target = f"{parsed.netloc}{parsed.path}"
+    intent_url = (
+        f"intent://{target}?{query}#Intent;scheme={parsed.scheme};"
+        f"package={package_name};end"
+    )
+    safe_href = html.escape(intent_url, quote=True)
+    script_target = json.dumps(intent_url)
+    body = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Return to SoundScore</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #FAF8F6; color: #251014; font-family: system-ui, sans-serif; }}
+    main {{ width: min(100%, 420px); text-align: center; }}
+    .mark {{ width: 64px; height: 64px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 50%; background: #F5E7E9; color: #722F37; font-size: 30px; }}
+    h1 {{ margin: 0 0 8px; font-size: 26px; }}
+    p {{ margin: 0 0 24px; color: #625850; line-height: 1.5; }}
+    a {{ display: block; width: 100%; padding: 14px 18px; border-radius: 14px; background: #722F37; color: white; font-weight: 700; text-decoration: none; }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">♪</div>
+    <h1>Return to SoundScore</h1>
+    <p>Your Spotify authorization is complete. Continue in the app.</p>
+    <a href="{safe_href}">Open SoundScore</a>
+  </main>
+  <script>window.location.replace({script_target});</script>
+</body>
+</html>"""
+    return HTMLResponse(
+        content=body,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 def configure_oauth_client(
@@ -272,7 +326,7 @@ async def create_auth_redirect(
     db: AsyncSession,
     user: User | None,
     error: str | None = None,
-) -> RedirectResponse:
+) -> RedirectResponse | HTMLResponse:
     """Return web tokens or a short-lived code for an approved native callback."""
     mobile_redirect_uri = request.session.pop("oauth_mobile_redirect_uri", None) or getattr(
         request.state,
@@ -282,8 +336,11 @@ async def create_auth_redirect(
     request.state.oauth_mobile_redirect_uri = mobile_redirect_uri
 
     if mobile_redirect_uri:
+        parsed_mobile_redirect = urlparse(mobile_redirect_uri)
         if error or user is None:
             query = urlencode({"error": error or "OAuth sign-in failed"})
+            if parsed_mobile_redirect.scheme in MOBILE_ANDROID_PACKAGES:
+                return create_mobile_app_bridge(mobile_redirect_uri, query)
             return RedirectResponse(url=f"{mobile_redirect_uri}?{query}", status_code=302)
 
         raw_code = secrets.token_urlsafe(48)
@@ -297,8 +354,11 @@ async def create_auth_redirect(
             )
         )
         await db.commit()
+        query = urlencode({"code": raw_code})
+        if parsed_mobile_redirect.scheme in MOBILE_ANDROID_PACKAGES:
+            return create_mobile_app_bridge(mobile_redirect_uri, query)
         return RedirectResponse(
-            url=f"{mobile_redirect_uri}?{urlencode({'code': raw_code})}",
+            url=f"{mobile_redirect_uri}?{query}",
             status_code=302,
         )
 
