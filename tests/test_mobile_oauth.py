@@ -93,3 +93,15 @@ def test_android_bridge_auto_opens_and_offers_a_button() -> None:
     assert "Open SoundScore" in body
     assert "intent://oauth/callback?code=single-use-code" in body
     assert "scheme=soundscore;package=br.com.soundscore.app" in body
+
+
+def test_android_bridge_supports_the_previous_https_callback() -> None:
+    response = create_mobile_app_bridge(
+        "https://www.soundscore.com.br/reviews/oauth/callback",
+        "code=single-use-code",
+    )
+    body = response.body.decode()
+
+    assert "Open SoundScore" in body
+    assert "intent://www.soundscore.com.br/reviews/oauth/callback?code=single-use-code" in body
+    assert "scheme=https;package=br.com.soundscore.app" in body

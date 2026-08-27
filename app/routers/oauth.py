@@ -58,8 +58,12 @@ MOBILE_EXCHANGE_CODE_TTL_SECONDS = 120
 def create_mobile_app_bridge(redirect_uri: str, query: str) -> HTMLResponse:
     """Render a user-activated Android handoff when Custom Tabs block redirects."""
     parsed = urlparse(redirect_uri)
-    package_name = MOBILE_ANDROID_PACKAGES[parsed.scheme]
-    target = f"{parsed.netloc}{parsed.path}"
+    if redirect_uri in MOBILE_OAUTH_HTTPS_REDIRECTS:
+        package_name = MOBILE_ANDROID_PACKAGES["soundscore"]
+        target = f"{parsed.netloc}{parsed.path}"
+    else:
+        package_name = MOBILE_ANDROID_PACKAGES[parsed.scheme]
+        target = f"{parsed.netloc}{parsed.path}"
     intent_url = (
         f"intent://{target}?{query}#Intent;scheme={parsed.scheme};"
         f"package={package_name};end"
@@ -337,9 +341,13 @@ async def create_auth_redirect(
 
     if mobile_redirect_uri:
         parsed_mobile_redirect = urlparse(mobile_redirect_uri)
+        use_android_bridge = (
+            parsed_mobile_redirect.scheme in MOBILE_ANDROID_PACKAGES
+            or mobile_redirect_uri in MOBILE_OAUTH_HTTPS_REDIRECTS
+        )
         if error or user is None:
             query = urlencode({"error": error or "OAuth sign-in failed"})
-            if parsed_mobile_redirect.scheme in MOBILE_ANDROID_PACKAGES:
+            if use_android_bridge:
                 return create_mobile_app_bridge(mobile_redirect_uri, query)
             return RedirectResponse(url=f"{mobile_redirect_uri}?{query}", status_code=302)
 
@@ -355,7 +363,7 @@ async def create_auth_redirect(
         )
         await db.commit()
         query = urlencode({"code": raw_code})
-        if parsed_mobile_redirect.scheme in MOBILE_ANDROID_PACKAGES:
+        if use_android_bridge:
             return create_mobile_app_bridge(mobile_redirect_uri, query)
         return RedirectResponse(
             url=f"{mobile_redirect_uri}?{query}",
