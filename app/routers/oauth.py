@@ -330,7 +330,7 @@ async def create_auth_redirect(
     if mobile_redirect_uri:
         parsed_mobile_redirect = urlparse(mobile_redirect_uri)
         use_android_bridge = (
-            parsed_mobile_redirect.scheme in MOBILE_ANDROID_PACKAGES
+            parsed_mobile_redirect.scheme in MOBILE_OAUTH_SCHEMES
             or mobile_redirect_uri in MOBILE_OAUTH_HTTPS_REDIRECTS
         )
         if error or user is None:

@@ -3,7 +3,7 @@ from starlette.requests import Request
 
 from app.core.exceptions import BadRequestException
 from app.core.security import create_oauth_link_token
-from app.routers.oauth import configure_oauth_client, configure_oauth_link, create_mobile_app_bridge
+from app.routers.oauth import create_auth_redirect, configure_oauth_client, configure_oauth_link, create_mobile_app_bridge
 
 
 def request_with_session() -> Request:
@@ -106,3 +106,19 @@ def test_android_bridge_supports_the_previous_https_callback() -> None:
     assert "Open SoundScore" in body
     assert "soundscore://oauth/callback?code=single-use-code" in body
     assert "intent://" not in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "redirect_uri",
+    ["soundscore://oauth/callback", "https://www.soundscore.com.br/reviews/oauth/callback"],
+)
+async def test_auth_error_uses_android_bridge_for_supported_mobile_callbacks(redirect_uri: str) -> None:
+    request = request_with_session()
+    request.session["oauth_mobile_redirect_uri"] = redirect_uri
+
+    response = await create_auth_redirect(request, None, None, "Access denied")  # type: ignore[arg-type]
+    body = response.body.decode()
+
+    assert response.status_code == 200
+    assert "soundscore://oauth/callback?error=Access+denied" in body
