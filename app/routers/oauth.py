@@ -47,29 +47,17 @@ MOBILE_OAUTH_SCHEMES = {"soundscore", "soundscore-dev", "soundscore-preview"}
 MOBILE_OAUTH_HTTPS_REDIRECTS = {
     "https://www.soundscore.com.br/reviews/oauth/callback",
 }
-MOBILE_ANDROID_PACKAGES = {
-    "soundscore": "br.com.soundscore.app",
-    "soundscore-dev": "br.com.soundscore.app.dev",
-    "soundscore-preview": "br.com.soundscore.app.preview",
-}
 MOBILE_EXCHANGE_CODE_TTL_SECONDS = 120
 
 
 def create_mobile_app_bridge(redirect_uri: str, query: str) -> HTMLResponse:
     """Render a user-activated Android handoff when Custom Tabs block redirects."""
-    parsed = urlparse(redirect_uri)
     if redirect_uri in MOBILE_OAUTH_HTTPS_REDIRECTS:
-        package_name = MOBILE_ANDROID_PACKAGES["soundscore"]
-        target = f"{parsed.netloc}{parsed.path}"
+        callback_url = f"soundscore://oauth/callback?{query}"
     else:
-        package_name = MOBILE_ANDROID_PACKAGES[parsed.scheme]
-        target = f"{parsed.netloc}{parsed.path}"
-    intent_url = (
-        f"intent://{target}?{query}#Intent;scheme={parsed.scheme};"
-        f"package={package_name};end"
-    )
-    safe_href = html.escape(intent_url, quote=True)
-    script_target = json.dumps(intent_url)
+        callback_url = f"{redirect_uri}?{query}"
+    safe_href = html.escape(callback_url, quote=True)
+    script_target = json.dumps(callback_url)
     body = f"""<!doctype html>
 <html lang="en">
 <head>
