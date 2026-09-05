@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     aws_secret_access_key: Optional[str] = None
     aws_s3_bucket: str = "soundscore-2"
     aws_region: str = "us-east-2"
+    # CloudFront distribution serving the public prefixes of the bucket.
+    # Empty falls back to presigned S3 URLs for everything.
+    cloudfront_domain: Optional[str] = None
 
     # File uploads
     max_upload_size_mb: int = 5

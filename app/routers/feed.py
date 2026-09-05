@@ -198,7 +198,7 @@ async def get_notifications(
                 response_data["group_uuid"] = group.uuid
                 response_data["group_name"] = group.name
                 if group.cover_image:
-                    response_data["group_cover_image"] = await StorageService.get_signed_url(
+                    response_data["group_cover_image"] = await StorageService.resolve_asset_url(
                         group.cover_image, expires_in=3600
                     )
 

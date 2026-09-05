@@ -335,7 +335,7 @@ async def upload_session_cover(
         file_ext = file.filename.split(".")[-1].lower() if file.filename else "jpg"
         image_path = f"session_covers/{current_user.id}_{uuid_module.uuid4()}.{file_ext}"
         StorageService.upload_file(image_path, contents, file.content_type)
-        preview_url = await StorageService.get_signed_url(image_path, expires_in=3600)
+        preview_url = await StorageService.resolve_asset_url(image_path, expires_in=3600)
         return {"image_path": image_path, "image_url": preview_url}
     except HTTPException:
         raise

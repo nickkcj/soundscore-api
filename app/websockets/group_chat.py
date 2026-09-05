@@ -240,7 +240,7 @@ async def group_chat_websocket(
                     # Resolve image URL if it's a storage path
                     resolved_image_url = image_url
                     if image_url and not image_url.startswith("http"):
-                        resolved_image_url = await StorageService.get_signed_url(image_url, expires_in=86400)
+                        resolved_image_url = await StorageService.resolve_asset_url(image_url, expires_in=86400)
 
                     # Broadcast to all users in the group
                     await manager.broadcast_to_group(

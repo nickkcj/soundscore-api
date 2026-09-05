@@ -215,7 +215,7 @@ class NotificationService:
         # Resolve group cover image
         group_cover_url = None
         if group.cover_image:
-            group_cover_url = await StorageService.get_signed_url(group.cover_image, expires_in=3600)
+            group_cover_url = await StorageService.resolve_asset_url(group.cover_image, expires_in=3600)
 
         # Push to SSE with extra invite data
         notification_data = {

@@ -35,6 +35,23 @@ def _get_s3_client():
     return _s3_client
 
 
+# Prefixes served publicly through CloudFront. Everything else (DM and group
+# message attachments) stays private and is served via presigned URLs.
+PUBLIC_PREFIXES = (
+    "profile_pictures/",
+    "banner_images/",
+    "groups_cover_images/",
+    "session_covers/",
+)
+
+# Object keys embed a UUID, so a given key never changes content.
+PUBLIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+def _is_public(path: str) -> bool:
+    return path.startswith(PUBLIC_PREFIXES)
+
+
 class StorageService:
     """Service for handling AWS S3 storage operations."""
 
@@ -48,12 +65,16 @@ class StorageService:
             data: File content as bytes
             content_type: MIME type (e.g., 'image/webp')
         """
+        extra_args = {"ContentType": content_type}
+        if _is_public(key):
+            extra_args["CacheControl"] = PUBLIC_CACHE_CONTROL
+
         client = _get_s3_client()
         client.upload_fileobj(
             BytesIO(data),
             settings.aws_s3_bucket,
             key,
-            ExtraArgs={"ContentType": content_type},
+            ExtraArgs=extra_args,
         )
 
     @staticmethod
@@ -98,12 +119,15 @@ class StorageService:
             return None
 
     @staticmethod
-    async def resolve_profile_picture(path: str | None) -> str | None:
+    async def resolve_asset_url(path: str | None, expires_in: int = 3600) -> str | None:
         """
-        Resolve a profile picture path to a usable URL.
+        Resolve a storage path to a URL the browser can load.
 
-        If the path is already a full URL, return it as-is.
-        If it's a storage path, generate a presigned URL (cached for 45 min).
+        Routing is driven by the key prefix, never by the call site:
+          - already a full URL (legacy/Spotify) -> returned as-is
+          - public prefix -> stable CloudFront URL, cacheable forever
+          - anything else -> presigned URL (cached), so an unknown prefix
+            fails closed as private
         """
         if not path:
             return None
@@ -112,35 +136,28 @@ class StorageService:
         if path.startswith("http://") or path.startswith("https://"):
             return path
 
-        # Check cache first (URLs valid for 1h, cache for 45 min)
+        # Public assets: deterministic URL, so browser and edge can cache it.
+        # No signing and no cache lookup needed.
+        if settings.cloudfront_domain and _is_public(path):
+            return f"https://{settings.cloudfront_domain}/{path}"
+
+        # Private assets: presigned URL (valid 1h, cached for 45 min)
         cache_key = f"{CacheKeys.SIGNED_URL}{path}"
         cached_url = await CacheService.get(cache_key)
         if cached_url:
             return cached_url
 
-        url = await StorageService.get_signed_url(path, expires_in=3600)
+        url = await StorageService.get_signed_url(path, expires_in=expires_in)
         if url:
             await CacheService.set(cache_key, url, ttl=2700)  # 45 minutes
         return url
 
     @staticmethod
+    async def resolve_profile_picture(path: str | None) -> str | None:
+        """Resolve a profile picture path to a usable URL."""
+        return await StorageService.resolve_asset_url(path)
+
+    @staticmethod
     async def resolve_banner_image(path: str | None) -> str | None:
-        """
-        Resolve a banner image path to a usable URL.
-        Same logic as profile picture with caching.
-        """
-        if not path:
-            return None
-
-        if path.startswith("http://") or path.startswith("https://"):
-            return path
-
-        cache_key = f"{CacheKeys.SIGNED_URL}{path}"
-        cached_url = await CacheService.get(cache_key)
-        if cached_url:
-            return cached_url
-
-        url = await StorageService.get_signed_url(path, expires_in=3600)
-        if url:
-            await CacheService.set(cache_key, url, ttl=2700)  # 45 minutes
-        return url
+        """Resolve a banner image path to a usable URL."""
+        return await StorageService.resolve_asset_url(path)

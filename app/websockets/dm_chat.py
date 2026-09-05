@@ -178,7 +178,7 @@ async def dm_websocket(
                     # Resolve image URL
                     resolved_image_url = image_url
                     if image_url and not image_url.startswith("http"):
-                        resolved_image_url = await StorageService.get_signed_url(
+                        resolved_image_url = await StorageService.resolve_asset_url(
                             image_url, expires_in=86400
                         )
 

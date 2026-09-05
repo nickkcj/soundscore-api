@@ -70,7 +70,7 @@ async def _build_group_response(group: Group, db: DbSession, user_id: int | None
     # Resolve cover image to signed URL
     cover_image_url = None
     if group.cover_image:
-        cover_image_url = await StorageService.get_signed_url(group.cover_image, expires_in=3600)
+        cover_image_url = await StorageService.resolve_asset_url(group.cover_image, expires_in=3600)
 
     return GroupResponse(
         id=group.id,
@@ -320,7 +320,7 @@ async def get_group(
         # Resolve message image URL if present
         message_image_url = None
         if m.image_url:
-            message_image_url = await StorageService.get_signed_url(m.image_url, expires_in=3600)
+            message_image_url = await StorageService.resolve_asset_url(m.image_url, expires_in=3600)
         message_responses.append(
             GroupMessageResponse(
                 id=m.id,
@@ -570,7 +570,7 @@ async def upload_message_image(
         StorageService.upload_file(image_path, contents, file.content_type)
 
         # Get presigned URL for the uploaded image
-        signed_url = await StorageService.get_signed_url(image_path, expires_in=86400)  # 24 hours
+        signed_url = await StorageService.resolve_asset_url(image_path, expires_in=86400)  # 24 hours
 
         return {"image_url": signed_url, "image_path": image_path}
 
@@ -876,7 +876,7 @@ async def get_group_messages(
         # Resolve message image URL if present
         message_image_url = None
         if m.image_url:
-            message_image_url = await StorageService.get_signed_url(m.image_url, expires_in=3600)
+            message_image_url = await StorageService.resolve_asset_url(m.image_url, expires_in=3600)
         message_responses.append(
             GroupMessageResponse(
                 id=m.id,
@@ -960,7 +960,7 @@ async def send_group_message(
                 id=existing.id,
                 content=existing.content,
                 image_url=(
-                    await StorageService.get_signed_url(existing.image_url, expires_in=3600)
+                    await StorageService.resolve_asset_url(existing.image_url, expires_in=3600)
                     if existing.image_url
                     else None
                 ),
@@ -984,7 +984,7 @@ async def send_group_message(
 
     resolved_image_url = None
     if message.image_url:
-        resolved_image_url = await StorageService.get_signed_url(message.image_url, expires_in=3600)
+        resolved_image_url = await StorageService.resolve_asset_url(message.image_url, expires_in=3600)
 
     return GroupMessageResponse(
         id=message.id,
@@ -1024,7 +1024,7 @@ async def _build_invite_response(invite: GroupInvite, db: DbSession) -> GroupInv
     inviter_profile_url = await StorageService.resolve_profile_picture(inviter.profile_picture)
     group_cover_url = None
     if group.cover_image:
-        group_cover_url = await StorageService.get_signed_url(group.cover_image, expires_in=3600)
+        group_cover_url = await StorageService.resolve_asset_url(group.cover_image, expires_in=3600)
 
     return GroupInviteResponse(
         id=invite.id,

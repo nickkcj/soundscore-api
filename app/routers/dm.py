@@ -250,7 +250,7 @@ async def get_messages(
         # Resolve image URL
         image_url = None
         if m.image_url:
-            image_url = await StorageService.get_signed_url(m.image_url, expires_in=3600)
+            image_url = await StorageService.resolve_asset_url(m.image_url, expires_in=3600)
 
         message_responses.append(
             DirectMessageResponse(
@@ -327,7 +327,7 @@ async def send_message(
                 sender_profile_picture=profile_picture,
                 content=existing.content,
                 image_url=(
-                    await StorageService.get_signed_url(existing.image_url, expires_in=3600)
+                    await StorageService.resolve_asset_url(existing.image_url, expires_in=3600)
                     if existing.image_url
                     else None
                 ),
@@ -362,7 +362,7 @@ async def send_message(
         sender_profile_picture=profile_picture,
         content=message.content,
         image_url=(
-            await StorageService.get_signed_url(message.image_url, expires_in=3600)
+            await StorageService.resolve_asset_url(message.image_url, expires_in=3600)
             if message.image_url
             else None
         ),
@@ -417,7 +417,7 @@ async def upload_dm_image(
         image_path = f"{bucket}/{filename}"
 
         StorageService.upload_file(image_path, contents, file.content_type)
-        signed_url = await StorageService.get_signed_url(image_path, expires_in=86400)
+        signed_url = await StorageService.resolve_asset_url(image_path, expires_in=86400)
 
         return {"image_url": signed_url, "image_path": image_path}
 

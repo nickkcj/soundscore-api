@@ -41,6 +41,7 @@ provider:
     BACKEND_URL: ${env:BACKEND_URL, 'http://localhost:8000'}
     FRONTEND_URL: ${env:FRONTEND_URL, 'http://localhost:3000'}
     AWS_S3_BUCKET: ${env:AWS_S3_BUCKET, 'soundscore-2'}
+    CLOUDFRONT_DOMAIN: ${env:CLOUDFRONT_DOMAIN, 'd31pkib2twg2cm.cloudfront.net'}
     MAX_UPLOAD_SIZE_MB: ${env:MAX_UPLOAD_SIZE_MB, '5'}
     RESEND_API_KEY: ${env:RESEND_API_KEY, ''}
 
