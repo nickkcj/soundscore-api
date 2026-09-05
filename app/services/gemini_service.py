@@ -252,21 +252,22 @@ Answer the user's question based on these results:
         self._ensure_configured()
 
         track_names = [t.get("name", "") for t in tracks[:15]]  # Limit to 15 tracks
-        tracks_text = ", ".join(track_names) if track_names else "Unknown tracks"
+        tracks_text = ", ".join(track_names) if track_names else "Faixas desconhecidas"
 
-        prompt = f"""Write a brief, engaging summary (2-3 paragraphs) about this music album.
-Focus on what listeners might expect from the album based on the artist and tracklist.
-Write in a neutral, informative tone suitable for a music review platform.
-Do NOT invent specific facts about chart positions, sales, or awards unless you're certain.
-Write in English.
+        prompt = f"""Escreva um resumo breve e envolvente, com 2 ou 3 parágrafos, sobre este álbum.
+Explique o que o ouvinte pode esperar da obra a partir do artista e da lista de faixas.
+Use português do Brasil natural, com tom neutro e informativo, adequado a uma plataforma de reviews musicais.
+Não traduza nomes próprios, títulos de álbuns ou nomes de faixas.
+Não invente posições em paradas, números de vendas, prêmios ou outros fatos específicos. Quando não houver informação suficiente, prefira uma descrição cuidadosa em vez de especular.
+Você pode usar itálico em Markdown apenas para títulos de obras. Não use título, cabeçalho, lista ou bloco de citação; comece diretamente pelo primeiro parágrafo.
 
-Album: {title}
-Artist: {artist}
-Release Date: {release_date or 'Unknown'}
-Label: {label or 'Unknown'}
-Tracks: {tracks_text}
+Álbum: {title}
+Artista: {artist}
+Data de lançamento: {release_date or 'Desconhecida'}
+Gravadora: {label or 'Desconhecida'}
+Faixas: {tracks_text}
 
-Write the summary now:"""
+Escreva o resumo agora, somente em português do Brasil:"""
 
         try:
             response = self._model.generate_content(prompt)
@@ -299,21 +300,20 @@ Write the summary now:"""
         """
         self._ensure_configured()
 
-        genres_text = ", ".join(genres) if genres else "Unknown genres"
+        genres_text = ", ".join(genres) if genres else "Gêneros desconhecidos"
 
-        prompt = f"""Write a brief, engaging biography (2-3 paragraphs) about this music artist.
-Focus on their musical style, career trajectory, and what makes them notable.
-Write in a neutral, informative tone suitable for a music review platform.
-Do NOT invent specific facts about chart positions, sales numbers, or awards unless you're absolutely certain they are accurate.
-If you're not sure about specific details, keep it general about their style and influence.
-Write in English.
-Output PLAIN TEXT only: no markdown, no ** bold markers, no headings, no titles, no bullet points — just the paragraphs separated by blank lines. Do not start with a title line; begin directly with the first paragraph.
+        prompt = f"""Escreva uma biografia breve e envolvente, com 2 ou 3 parágrafos, sobre este artista musical.
+Apresente seu estilo musical, sua trajetória e o que o torna relevante.
+Use português do Brasil natural, com tom neutro e informativo, adequado a uma plataforma de reviews musicais.
+Não traduza nomes próprios, nomes artísticos, títulos de obras ou nomes de gêneros consagrados.
+Não invente posições em paradas, números de vendas, prêmios ou outros fatos específicos. Quando não tiver certeza, descreva de forma geral o estilo e a influência do artista.
+Produza somente texto simples: sem Markdown, negrito, cabeçalhos, títulos ou listas. Separe os parágrafos com uma linha em branco e comece diretamente pelo primeiro parágrafo.
 
-Artist: {name}
-Genres: {genres_text}
-Popularity Score: {popularity}/100
+Artista: {name}
+Gêneros: {genres_text}
+Índice de popularidade: {popularity}/100
 
-Write the biography now:"""
+Escreva a biografia agora, somente em português do Brasil:"""
 
         try:
             response = self._model.generate_content(prompt)

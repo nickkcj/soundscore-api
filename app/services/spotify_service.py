@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import logging
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -25,6 +26,40 @@ class SpotifyService:
     def __init__(self):
         self._access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
+
+    @staticmethod
+    def _deduplicate_albums(
+        albums: list[SpotifyAlbumResult],
+        limit: int,
+    ) -> list[SpotifyAlbumResult]:
+        """Remove equivalent Spotify editions while preserving result order."""
+        unique_albums: list[SpotifyAlbumResult] = []
+        spotify_ids: set[str] = set()
+        editions: set[tuple[str, str, str]] = set()
+
+        def normalize(value: str) -> str:
+            normalized = unicodedata.normalize("NFKC", value).casefold()
+            return " ".join(normalized.split())
+
+        for album in albums:
+            # Market-specific Spotify entries generally share title, artist
+            # and artwork. The date is only a fallback for results without art.
+            visual_identity = album.cover_image or album.release_date or ""
+            edition_key = (
+                normalize(album.title),
+                normalize(album.artist),
+                normalize(visual_identity),
+            )
+            if album.spotify_id in spotify_ids or edition_key in editions:
+                continue
+
+            spotify_ids.add(album.spotify_id)
+            editions.add(edition_key)
+            unique_albums.append(album)
+            if len(unique_albums) == limit:
+                break
+
+        return unique_albums
 
     async def _get_access_token(self) -> str:
         """Get or refresh Spotify access token using Client Credentials flow."""
@@ -76,7 +111,8 @@ class SpotifyService:
         try:
             cached = await CacheService.get_json(cache_key)
             if cached:
-                return [SpotifyAlbumResult(**item) for item in cached]
+                cached_albums = [SpotifyAlbumResult(**item) for item in cached]
+                return self._deduplicate_albums(cached_albums, limit)
         except Exception as e:
             logger.error(f"Erro ao ler cache: {e}")
 
@@ -128,6 +164,8 @@ class SpotifyService:
             except (KeyError, IndexError) as e:
                 logger.warning(f"Erro ao parsear álbum do Spotify: {e}")
                 continue
+
+        albums = self._deduplicate_albums(albums, limit)
 
         # 5. Cache results for 1 hour
         if albums:
