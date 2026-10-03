@@ -1,3 +1,4 @@
+from app.services.moderation_service import require_terms
 import json
 from datetime import datetime, timezone
 from uuid import UUID
@@ -29,7 +30,8 @@ async def get_user_from_token(token: str) -> User | None:
         result = await db.execute(
             select(User).where(identity_filter)
         )
-        return result.scalar_one_or_none()
+        user = result.scalar_one_or_none()
+        return user if user and user.is_active else None
 
 
 async def verify_group_membership(user_id: int, group_id: int) -> bool:
@@ -47,6 +49,7 @@ async def verify_group_membership(user_id: int, group_id: int) -> bool:
 async def save_message(group_id: int, user_id: int, content: str, image_url: str | None = None) -> GroupMessage:
     """Save a chat message to the database."""
     async with AsyncSessionLocal() as db:
+        await require_terms(db, user_id)
         message = GroupMessage(
             group_id=group_id,
             user_id=user_id,

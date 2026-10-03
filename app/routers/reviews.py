@@ -1,3 +1,4 @@
+from app.services.moderation_service import blocked_user_ids, ensure_not_blocked, require_terms
 from datetime import datetime
 from uuid import UUID
 
@@ -235,6 +236,7 @@ async def discover(
         user_filters = [User.username.ilike(f"%{q}%")]
         if current_user:
             user_filters.append(User.id != current_user.id)
+            user_filters.append(User.id.not_in(blocked_user_ids(current_user.id)))
 
         user_query = await db.execute(
             select(User)
@@ -283,6 +285,7 @@ async def discover(
             select(Review, like_count_sq, comment_count_sq)
             .join(Album, Review.album_id == Album.id)
             .options(selectinload(Review.album), selectinload(Review.user))
+            .where(Review.user_id.not_in(blocked_user_ids(current_user.id)) if current_user else True)
             .where(or_(
                 Review.text.ilike(f"%{q}%"),
                 Album.title.ilike(f"%{q}%"),
@@ -447,6 +450,7 @@ async def create_review(
     - Creates the album record if it doesn't exist
     """
     # Get or create album
+    await require_terms(db, current_user.id)
     album_result = await db.execute(
         select(Album).where(Album.spotify_id == review_data.spotify_id)
     )
@@ -524,6 +528,8 @@ async def get_review(
     if not review:
         raise NotFoundException("Review not found")
 
+    if current_user:
+        await ensure_not_blocked(db, current_user.id, review.user_id)
     return await _build_review_response(
         review, db,
         current_user.id if current_user else None
@@ -546,6 +552,7 @@ async def update_review(
 
     Only the review author can update.
     """
+    await require_terms(db, current_user.id)
     result = await db.execute(
         select(Review)
         .options(selectinload(Review.user), selectinload(Review.album))
@@ -648,6 +655,8 @@ async def get_user_reviews(
         count_query = count_query.where(Review.is_favorite == True)
 
     # Get total
+    if current_user:
+        count_query = count_query.where(Review.user_id.not_in(blocked_user_ids(current_user.id)))
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
@@ -655,6 +664,7 @@ async def get_user_reviews(
     offset = (page - 1) * per_page
     result = await db.execute(
         query
+        .where(Review.user_id.not_in(blocked_user_ids(current_user.id)) if current_user else True)
         .options(selectinload(Review.user), selectinload(Review.album))
         .order_by(Review.created_at.desc())
         .offset(offset)
@@ -709,7 +719,7 @@ async def get_album_reviews(
 
     # Get total
     total_result = await db.execute(
-        select(func.count()).select_from(Review).where(Review.album_id == album.id)
+        select(func.count()).select_from(Review).where(Review.album_id == album.id, Review.user_id.not_in(blocked_user_ids(current_user.id)) if current_user else True)
     )
     total = total_result.scalar() or 0
 
@@ -718,7 +728,7 @@ async def get_album_reviews(
     result = await db.execute(
         select(Review)
         .options(selectinload(Review.user), selectinload(Review.album))
-        .where(Review.album_id == album.id)
+        .where(Review.album_id == album.id, Review.user_id.not_in(blocked_user_ids(current_user.id)) if current_user else True)
         .order_by(Review.created_at.desc())
         .offset(offset)
         .limit(per_page)
@@ -756,12 +766,15 @@ async def create_comment(
 ):
     """Add a comment to a review. Supports nested replies via parent_id."""
     # Verify review exists
+    await require_terms(db, current_user.id)
     review_result = await db.execute(
         select(Review).where(Review.uuid == review_uuid)
     )
     review = review_result.scalar_one_or_none()
     if not review:
         raise NotFoundException("Review not found")
+    if current_user:
+        await ensure_not_blocked(db, current_user.id, review.user_id)
 
     # Verify parent comment if provided
     parent_comment = None
@@ -845,12 +858,17 @@ async def get_review_comments(
     review = review_result.scalar_one_or_none()
     if not review:
         raise NotFoundException("Review not found")
+    if current_user:
+        await ensure_not_blocked(db, current_user.id, review.user_id)
+
+    excluded = set((await db.scalars(blocked_user_ids(current_user.id))).all()) if current_user else set()
 
     # Get total top-level comments
     total_result = await db.execute(
         select(func.count()).select_from(Comment).where(
             Comment.review_id == review.id,
-            Comment.parent_id == None
+            Comment.parent_id == None,
+            Comment.user_id.not_in(excluded)
         )
     )
     total = total_result.scalar() or 0
@@ -865,7 +883,8 @@ async def get_review_comments(
         )
         .where(
             Comment.review_id == review.id,
-            Comment.parent_id == None
+            Comment.parent_id == None,
+            Comment.user_id.not_in(excluded)
         )
         .order_by(Comment.created_at.desc())
         .offset(offset)
@@ -908,6 +927,8 @@ async def get_review_comments(
         # Resolve profile pictures for replies
         replies = []
         for reply in sorted(comment.replies, key=lambda r: r.created_at):
+            if reply.user_id in excluded:
+                continue
             reply_profile_url = await StorageService.resolve_profile_picture(reply.user.profile_picture)
             replies.append(
                 CommentResponse(
@@ -1009,6 +1030,8 @@ async def toggle_comment_like(
     review = review_result.scalar_one_or_none()
     if not review:
         raise NotFoundException("Review not found")
+    if current_user:
+        await ensure_not_blocked(db, current_user.id, review.user_id)
 
     # Verify comment exists
     comment_result = await db.execute(
@@ -1020,6 +1043,8 @@ async def toggle_comment_like(
     comment = comment_result.scalar_one_or_none()
     if not comment:
         raise NotFoundException("Comment not found")
+
+    await ensure_not_blocked(db, current_user.id, comment.user_id)
 
     # Check if already liked
     existing_like = await db.execute(
@@ -1071,6 +1096,8 @@ async def toggle_like(
     review = review_result.scalar_one_or_none()
     if not review:
         raise NotFoundException("Review not found")
+    if current_user:
+        await ensure_not_blocked(db, current_user.id, review.user_id)
 
     # Check existing like
     like_result = await db.execute(

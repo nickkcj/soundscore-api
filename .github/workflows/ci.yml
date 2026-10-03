@@ -12,8 +12,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      DATABASE_URL: postgresql+asyncpg://user:password@localhost:5432/soundscore_test
+      DATABASE_URL: postgresql+asyncpg://postgres:local-qa-only@127.0.0.1:55439/soundscore_qa
+      PYTHONPATH: .
       JWT_SECRET_KEY: ci-only-not-a-production-secret
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: local-qa-only
+          POSTGRES_DB: soundscore_qa
+        ports:
+          - 55439:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,3 +38,11 @@ jobs:
       - run: python -m compileall -q app alembic
       - run: pytest -q
       - run: alembic heads
+      - name: Verify migration and community safety against PostgreSQL
+        run: |
+          python scripts/bootstrap-community-safety-qa.py
+          alembic stamp m3n4o5p6q7r8
+          alembic upgrade head
+          python scripts/verify-community-safety.py
+          alembic downgrade m3n4o5p6q7r8
+          alembic upgrade head

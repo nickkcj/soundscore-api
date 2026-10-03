@@ -1,3 +1,4 @@
+from app.services.moderation_service import blocked_user_ids, ensure_not_blocked, require_terms
 import uuid as uuid_module
 from uuid import UUID
 
@@ -106,6 +107,7 @@ async def create_group(
     The creator automatically becomes an admin member.
     """
     # Create group
+    await require_terms(db, current_user.id)
     group = Group(
         name=group_data.name,
         description=group_data.description,
@@ -307,7 +309,7 @@ async def get_group(
         messages_result = await db.execute(
             select(GroupMessage)
             .options(selectinload(GroupMessage.user))
-            .where(GroupMessage.group_id == group.id)
+            .where(GroupMessage.group_id == group.id, GroupMessage.user_id.not_in(blocked_user_ids(current_user.id)))
             .order_by(GroupMessage.created_at.desc())
             .limit(50)
         )
@@ -355,6 +357,7 @@ async def update_group(
 ):
     """Update group settings. Only admins can update."""
     # Get group
+    await require_terms(db, current_user.id)
     result = await db.execute(
         select(Group).where(Group.uuid == group_uuid)
     )
@@ -439,6 +442,7 @@ async def upload_group_cover(
     - Accepts JPG, PNG, WebP, and GIF images
     - Maximum file size: 5MB
     """
+    await require_terms(db, current_user.id)
     settings = get_settings()
 
     # Get group
@@ -852,7 +856,8 @@ async def get_group_messages(
     # Get total
     total_result = await db.execute(
         select(func.count()).select_from(GroupMessage).where(
-            GroupMessage.group_id == group.id
+            GroupMessage.group_id == group.id,
+            GroupMessage.user_id.not_in(blocked_user_ids(current_user.id))
         )
     )
     total = total_result.scalar() or 0
@@ -862,7 +867,7 @@ async def get_group_messages(
     result = await db.execute(
         select(GroupMessage)
         .options(selectinload(GroupMessage.user))
-        .where(GroupMessage.group_id == group.id)
+        .where(GroupMessage.group_id == group.id, GroupMessage.user_id.not_in(blocked_user_ids(current_user.id)))
         .order_by(GroupMessage.created_at.desc())
         .offset(offset)
         .limit(per_page)
@@ -917,6 +922,7 @@ async def send_group_message(
     Delivery to other members happens via Supabase Realtime, which
     broadcasts the INSERT on group_messages to subscribed clients.
     """
+    await require_terms(db, current_user.id)
     content = message_data.content.strip()
     image_path = message_data.image_path or message_data.image_url
     if not content and not image_path:
@@ -1097,6 +1103,8 @@ async def create_invite(
 
     if invitee.id == current_user.id:
         raise BadRequestException("You cannot invite yourself")
+
+    await ensure_not_blocked(db, current_user.id, invitee.id)
 
     # 4. Check if already a member
     existing_member = await db.execute(

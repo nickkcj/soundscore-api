@@ -1,3 +1,4 @@
+from app.services.moderation_service import blocked_user_ids, ensure_not_blocked, require_terms
 """Direct message router for 1:1 conversations."""
 
 import json
@@ -58,6 +59,8 @@ async def list_conversations(
         .order_by(Conversation.updated_at.desc())
     )
     conversations = conversations_result.scalars().all()
+    excluded = set((await db.scalars(blocked_user_ids(current_user.id))).all())
+    conversations = [c for c in conversations if c.user1_id not in excluded and c.user2_id not in excluded]
 
     if not conversations:
         return ConversationListResponse(conversations=[], total=0)
@@ -160,6 +163,8 @@ async def start_conversation(
     if other_user.id == current_user.id:
         raise BadRequestException("Cannot message yourself")
 
+    await ensure_not_blocked(db, current_user.id, other_user.id)
+
     # Check for existing conversation (IDs always stored in ascending order)
     u1, u2 = _get_ordered_ids(current_user.id, other_user.id)
 
@@ -217,6 +222,8 @@ async def get_messages(
 
     if current_user.id not in (conv.user1_id, conv.user2_id):
         raise ForbiddenException("Not a participant of this conversation")
+
+    await ensure_not_blocked(db, current_user.id, conv.user2_id if current_user.id == conv.user1_id else conv.user1_id)
 
     # Total
     total_result = await db.execute(
@@ -289,6 +296,7 @@ async def send_message(
 ):
     """Send a message in a conversation."""
     # Verify participant
+    await require_terms(db, current_user.id)
     conv_result = await db.execute(
         select(Conversation).where(Conversation.id == conversation_id)
     )
@@ -298,6 +306,8 @@ async def send_message(
 
     if current_user.id not in (conv.user1_id, conv.user2_id):
         raise ForbiddenException("Not a participant of this conversation")
+
+    await ensure_not_blocked(db, current_user.id, conv.user2_id if current_user.id == conv.user1_id else conv.user1_id)
 
     content = body.content.strip()
     image_path = body.image_path or body.image_url
@@ -396,6 +406,8 @@ async def upload_dm_image(
     if current_user.id not in (conv.user1_id, conv.user2_id):
         raise ForbiddenException("Not a participant of this conversation")
 
+    await ensure_not_blocked(db, current_user.id, conv.user2_id if current_user.id == conv.user1_id else conv.user1_id)
+
     # Validate file type
     allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
     if file.content_type not in allowed_types:
@@ -451,6 +463,8 @@ async def mark_as_read(
     if current_user.id not in (conv.user1_id, conv.user2_id):
         raise ForbiddenException("Not a participant of this conversation")
 
+    await ensure_not_blocked(db, current_user.id, conv.user2_id if current_user.id == conv.user1_id else conv.user1_id)
+
     # Mark unread messages from the other user as read
     from sqlalchemy import update
     await db.execute(
@@ -459,6 +473,8 @@ async def mark_as_read(
             DirectMessage.conversation_id == conversation_id,
             DirectMessage.sender_id != current_user.id,
             DirectMessage.is_read == False,
+            Conversation.user1_id.not_in(blocked_user_ids(current_user.id)),
+            Conversation.user2_id.not_in(blocked_user_ids(current_user.id)),
         )
         .values(is_read=True)
     )
@@ -486,6 +502,8 @@ async def get_unread_count(
             ),
             DirectMessage.sender_id != current_user.id,
             DirectMessage.is_read == False,
+            Conversation.user1_id.not_in(blocked_user_ids(current_user.id)),
+            Conversation.user2_id.not_in(blocked_user_ids(current_user.id)),
         )
     )
     count = result.scalar() or 0
@@ -505,6 +523,7 @@ async def share_review(
     db: DbSession,
 ):
     """Share a review link to a user (DM) or group chat."""
+    await require_terms(db, current_user.id)
     if not body.recipient_username and not body.group_uuid:
         raise BadRequestException("Must specify recipient_username or group_uuid")
 
@@ -548,6 +567,8 @@ async def share_review(
 
         if recipient.id == current_user.id:
             raise BadRequestException("Cannot share with yourself")
+
+        await ensure_not_blocked(db, current_user.id, recipient.id)
 
         # Get or create conversation
         u1, u2 = _get_ordered_ids(current_user.id, recipient.id)

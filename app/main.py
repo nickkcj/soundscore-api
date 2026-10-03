@@ -7,7 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.routers import auth, users, reviews, feed, groups, chatbot, home, oauth, library, artist, dm, realtime, sessions, push
+from app.routers import moderation, auth, users, reviews, feed, groups, chatbot, home, oauth, library, artist, dm, realtime, sessions, push
 from app.websockets import group_chat, dm_chat
 from app.services.cache_service import CacheService
 from app.services.http_client import HTTPClientManager
@@ -216,3 +216,5 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+app.include_router(moderation.router, prefix=f"{settings.api_v1_prefix}/moderation", tags=["Moderation"])
