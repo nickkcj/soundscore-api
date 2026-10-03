@@ -3,6 +3,10 @@ import os
 import asyncio
 if os.environ.get("DATABASE_URL") != "postgresql+asyncpg://postgres:local-qa-only@127.0.0.1:55439/soundscore_qa":
     raise SystemExit("Use only the disposable soundscore QA database on port 55439")
+# Do not use external production services from a developer's .env during QA.
+for service in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_JWT_SECRET", "RESEND_API_KEY", "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_OAUTH_CLIENT_ID", "SPOTIFY_OAUTH_CLIENT_SECRET", "GOOGLE_API_KEY", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"):
+ os.environ[service] = ""
+os.environ["REDIS_URL"] = "redis://127.0.0.1:55440"
 from app.main import app  # Registers all mapped models, including scrobbles.
 from app.database import Base, engine
 from sqlalchemy import text

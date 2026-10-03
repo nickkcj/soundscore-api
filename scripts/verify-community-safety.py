@@ -5,6 +5,10 @@ if os.environ.get("DATABASE_URL") != "postgresql+asyncpg://postgres:local-qa-onl
 import asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
+# Do not use external production services from a developer's .env during QA.
+for service in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_JWT_SECRET", "RESEND_API_KEY", "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_OAUTH_CLIENT_ID", "SPOTIFY_OAUTH_CLIENT_SECRET", "GOOGLE_API_KEY", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"):
+ os.environ[service] = ""
+os.environ["REDIS_URL"] = "redis://127.0.0.1:55440"
 from app.main import app
 from app.database import AsyncSessionLocal, engine
 from app.models.user import User
