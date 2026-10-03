@@ -138,6 +138,7 @@ async def update_profile(
     - **profile_picture**: Profile picture URL (optional)
     """
     # Check if new username is taken
+    await require_terms(db, current_user.id)
     if update_data.username and update_data.username.lower() != current_user.username:
         result = await db.execute(
             select(User).where(User.username == update_data.username.lower())
@@ -520,6 +521,7 @@ async def upload_profile_picture(
     - Accepts JPG, PNG, WebP, and GIF images
     - Maximum file size: 5MB
     """
+    await require_terms(db, current_user.id)
     settings = get_settings()
 
     # Validate file type
@@ -587,6 +589,7 @@ async def upload_banner_image(
     - Maximum file size: 5MB
     - Recommended aspect ratio: 3:1 (e.g., 1500x500)
     """
+    await require_terms(db, current_user.id)
     settings = get_settings()
 
     # Validate file type

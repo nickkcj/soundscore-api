@@ -1,3 +1,4 @@
+from app.services.moderation_service import require_terms
 """
 Listening Party — rotas da sala de escuta em grupo.
 
@@ -274,6 +275,7 @@ def _build_summary(session: ListeningSession, by_track: dict) -> SessionSummary:
 
 @router.post("", response_model=SessionState, status_code=201, summary="Create listening session")
 async def create_session(data: SessionCreate, current_user: CurrentUser, db: DbSession):
+    await require_terms(db, current_user.id)
     tracks = [t.strip() for t in data.tracks if t.strip()]
     if not tracks:
         raise BadRequestException("Tracklist cannot be empty")

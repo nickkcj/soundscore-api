@@ -442,6 +442,7 @@ async def upload_group_cover(
     - Accepts JPG, PNG, WebP, and GIF images
     - Maximum file size: 5MB
     """
+    await require_terms(db, current_user.id)
     settings = get_settings()
 
     # Get group
