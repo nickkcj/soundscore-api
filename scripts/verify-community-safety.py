@@ -29,8 +29,11 @@ async def main():
   ids=(alice.id,bob.id,admin.id);review_uuid=str(review.uuid)
  def headers(user,i):return {'Authorization':'Bearer '+create_access_token(user,user_id=i)}
  ah,bh,mh=headers('qa_alice',ids[0]),headers('qa_bob',ids[1]),headers('qa_admin',ids[2])
+ checks = 0
  async with AsyncClient(transport=ASGITransport(app=app),base_url='http://qa') as c:
   async def req(method,path,h,expected,**kw):
+   nonlocal checks
+   checks += 1
    r=await c.request(method,'/api/v1'+path,headers=h,**kw)
    assert r.status_code==expected,(path,r.status_code,r.text)
    return r.json()
@@ -58,6 +61,6 @@ async def main():
   await req('POST',f"/moderation/reports/{reports['reports'][0]['id']}/resolve",mh,200,json={'action':'remove','note':'Confirmed spam'})
   await req('GET',f'/reviews/{review_uuid}',ah,404)
   await req('DELETE','/users/account',ah,200)
-  print('PASS: 25 API checks covering terms, report deduplication, moderator permissions, bilateral blocks, feed visibility, removal and account deletion')
+  print(f'PASS: {checks} API checks covering terms, report deduplication, moderator permissions, bilateral blocks, feed visibility, removal and account deletion')
  await engine.dispose()
 asyncio.run(main())
