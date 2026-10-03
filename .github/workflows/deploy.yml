@@ -47,6 +47,9 @@ jobs:
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
 
+      - name: Apply database migrations
+        run: alembic upgrade head
+
       - name: Deploy
         run: npx serverless deploy --stage prod
         env:

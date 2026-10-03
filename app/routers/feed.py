@@ -1,3 +1,4 @@
+from app.services.moderation_service import blocked_user_ids, ensure_not_blocked, require_terms
 import asyncio
 import json
 from typing import AsyncGenerator
@@ -73,6 +74,9 @@ async def get_feed(
         query = select(Review)
         count_query = select(func.count()).select_from(Review)
 
+    query = query.where(Review.user_id.not_in(blocked_user_ids(current_user.id)))
+    count_query = count_query.where(Review.user_id.not_in(blocked_user_ids(current_user.id)))
+
     # Get total
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -125,7 +129,7 @@ async def get_notifications(
 ):
     """Get user's notifications."""
     # Build query
-    query = select(Notification).where(Notification.recipient_id == current_user.id)
+    query = select(Notification).where(Notification.recipient_id == current_user.id, Notification.actor_id.not_in(blocked_user_ids(current_user.id)))
     count_query = select(func.count()).select_from(Notification).where(
         Notification.recipient_id == current_user.id
     )
@@ -142,6 +146,7 @@ async def get_notifications(
     unread_result = await db.execute(
         select(func.count()).select_from(Notification).where(
             Notification.recipient_id == current_user.id,
+            Notification.actor_id.not_in(blocked_user_ids(current_user.id)),
             Notification.is_read == False
         )
     )
@@ -224,6 +229,7 @@ async def get_unread_count(current_user: CurrentUser, db: DbSession):
     result = await db.execute(
         select(func.count()).select_from(Notification).where(
             Notification.recipient_id == current_user.id,
+            Notification.actor_id.not_in(blocked_user_ids(current_user.id)),
             Notification.is_read == False
         )
     )
@@ -270,6 +276,7 @@ async def mark_all_notifications_read(current_user: CurrentUser, db: DbSession):
     result = await db.execute(
         select(Notification).where(
             Notification.recipient_id == current_user.id,
+            Notification.actor_id.not_in(blocked_user_ids(current_user.id)),
             Notification.is_read == False
         )
     )

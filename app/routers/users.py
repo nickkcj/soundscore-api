@@ -1,3 +1,4 @@
+from app.services.moderation_service import blocked_user_ids, ensure_not_blocked, require_terms
 import asyncio
 import logging
 import uuid
@@ -60,6 +61,9 @@ async def get_user_profile(
 
     if not user:
         raise NotFoundException("User not found")
+
+    if current_user:
+        await ensure_not_blocked(db, current_user.id, user.id)
 
     # Get review stats
     stats_result = await db.execute(
@@ -195,6 +199,8 @@ async def follow_user(
 
     if not target_user:
         raise NotFoundException("User not found")
+
+    await ensure_not_blocked(db, current_user.id, target_user.id)
 
     # Check if already following
     existing_follow = await db.execute(
@@ -349,6 +355,7 @@ async def get_followers(
         for f in follows
     ])
 
+    excluded = set((await db.scalars(blocked_user_ids(current_user.id))).all())
     users = [
         UserListItem(
             id=f.follower.id,
@@ -426,6 +433,7 @@ async def get_following(
         for f in follows
     ])
 
+    excluded = set((await db.scalars(blocked_user_ids(current_user.id))).all())
     users = [
         UserListItem(
             id=f.following.id,
@@ -473,6 +481,7 @@ async def get_suggested_users(
         db, current_user.id, limit
     )
 
+    excluded = set((await db.scalars(blocked_user_ids(current_user.id))).all())
     users = [
         UserListItem(
             id=rec.user_id,
@@ -482,7 +491,7 @@ async def get_suggested_users(
             is_following=False,
             followers_count=rec.followers_count,
         )
-        for rec in recommendations
+        for rec in recommendations if rec.user_id not in excluded
     ]
 
     return PaginatedUsersResponse(

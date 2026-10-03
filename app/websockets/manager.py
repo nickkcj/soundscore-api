@@ -1,6 +1,8 @@
 import json
 from typing import Dict, Set
-from fastapi import WebSocket
+from fastapi import WebSocket, HTTPException
+from app.database import AsyncSessionLocal
+from app.services.moderation_service import ensure_not_blocked
 
 
 class ConnectionManager:
@@ -53,7 +55,14 @@ class ConnectionManager:
             return
 
         message_text = json.dumps(message)
-        for user_id, websocket in self.active_connections[group_id].items():
+        for user_id, websocket in list(self.active_connections[group_id].items()):
+            actor_id = message.get("user_id") or message.get("sender_id")
+            if actor_id and actor_id != user_id:
+                async with AsyncSessionLocal() as db:
+                    try:
+                        await ensure_not_blocked(db, user_id, actor_id)
+                    except HTTPException:
+                        continue
             if exclude_user_id and user_id == exclude_user_id:
                 continue
             try:

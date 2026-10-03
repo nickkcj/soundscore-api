@@ -1,3 +1,5 @@
+from app.services.moderation_service import ensure_not_blocked, require_terms
+from fastapi import HTTPException
 """WebSocket handler for direct message conversations."""
 
 import json
@@ -32,7 +34,8 @@ async def get_user_from_token(token: str) -> User | None:
         result = await db.execute(
             select(User).where(identity_filter)
         )
-        return result.scalar_one_or_none()
+        user = result.scalar_one_or_none()
+        return user if user and user.is_active else None
 
 
 async def verify_conversation_participant(user_id: int, conversation_id: int) -> bool:
@@ -44,12 +47,23 @@ async def verify_conversation_participant(user_id: int, conversation_id: int) ->
         conv = result.scalar_one_or_none()
         if not conv:
             return False
-        return user_id in (conv.user1_id, conv.user2_id)
+        if user_id not in (conv.user1_id, conv.user2_id):
+            return False
+        try:
+            await ensure_not_blocked(db, user_id, conv.user2_id if conv.user1_id == user_id else conv.user1_id)
+        except HTTPException:
+            return False
+        return True
 
 
 async def save_dm_message(conversation_id: int, sender_id: int, content: str, image_url: str | None = None) -> DirectMessage:
     """Save a direct message to the database."""
     async with AsyncSessionLocal() as db:
+        conv = await db.get(Conversation, conversation_id)
+        if not conv or sender_id not in (conv.user1_id, conv.user2_id):
+            raise HTTPException(403, "Interaction unavailable")
+        await ensure_not_blocked(db, sender_id, conv.user2_id if conv.user1_id == sender_id else conv.user1_id)
+        await require_terms(db, sender_id)
         message = DirectMessage(
             conversation_id=conversation_id,
             sender_id=sender_id,
@@ -153,6 +167,9 @@ async def dm_websocket(
     try:
         while True:
             data = await websocket.receive_text()
+            if not await verify_conversation_participant(user.id, conversation_id):
+                await websocket.close(code=4003, reason="Interaction unavailable")
+                return
 
             try:
                 message_data = json.loads(data)

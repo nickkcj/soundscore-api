@@ -37,3 +37,5 @@ __all__ = [
     "OAuthExchangeCode",
     "PushDevice",
 ]
+
+from app.models.moderation import UserBlock, ContentReport, TermsAcceptance
